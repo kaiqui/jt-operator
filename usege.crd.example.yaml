@@ -1,0 +1,12 @@
+apiVersion: titlis.io/v1
+kind: SLOConfig
+metadata:
+  name: service-availability
+  namespace: default
+spec:
+  service: service
+  type: metric
+  app_framework: fastapi
+  target: 98.0
+  warning: 99.0
+  timeframe: 30d
