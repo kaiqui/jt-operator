@@ -1,0 +1,39 @@
+# config/env-validation-rules.yaml
+env_validation:
+  enabled: true
+  strict_mode: false
+  rules:
+    - name: DD_LOGS_INJECTION
+      expected_value: "true"
+      required: true
+      severity: error
+      description: "Enable Datadog logs injection"
+    
+    - name: DD_ENV
+      expected_value: "dev"  # Pode ser substituído por variável de ambiente
+      required: true
+      severity: error
+      description: "Datadog environment tag"
+    
+    - name: DD_SERVICE
+      expected_value: "sismob-api"  # Pode ser dinâmico baseado no nome do deployment
+      required: true
+      severity: error
+      description: "Service name for Datadog"
+    
+    - name: DD_VERSION
+      required: true
+      severity: warning  # Apenas warning se não estiver presente
+      description: "Service version for Datadog"
+    
+    - name: DD_AGENT_HOST
+      expected_value: "datadog-agent.default"
+      required: true
+      severity: error
+      description: "Datadog agent host"
+    
+    - name: NODE_ENV
+      expected_value: "production"
+      required: false  # Opcional
+      severity: warning
+      description: "Node.js environment"
