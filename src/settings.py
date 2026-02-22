@@ -92,6 +92,20 @@ class Settings(BaseSettings):
     castai_monitor_interval_seconds: int = Field(default=60, validation_alias="CASTAI_MONITOR_INTERVAL_SECONDS")
     castai_cluster_name: str = Field(default="develop", validation_alias="CASTAI_CLUSTER_NAME")
 
+    # Backstage
+    backstage_url: Optional[str] = Field(default=None, validation_alias="BACKSTAGE_URL")
+    backstage_token: Optional[str] = Field(default=None, validation_alias="BACKSTAGE_TOKEN")
+    backstage_cache_ttl_seconds: int = Field(default=300, validation_alias="BACKSTAGE_CACHE_TTL_SECONDS")
+
+    # CAST AI Cost Enricher
+    castai_api_key: Optional[str] = Field(default=None, validation_alias="CASTAI_API_KEY")
+    castai_cluster_id: Optional[str] = Field(default=None, validation_alias="CASTAI_CLUSTER_ID")
+    castai_cost_cache_ttl_seconds: int = Field(default=300, validation_alias="CASTAI_COST_CACHE_TTL_SECONDS")
+
+    # Scorecard Enricher
+    enable_backstage_enrichment: bool = Field(default=False, validation_alias="ENABLE_BACKSTAGE_ENRICHMENT")
+    enable_castai_cost_enrichment: bool = Field(default=False, validation_alias="ENABLE_CASTAI_COST_ENRICHMENT")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
