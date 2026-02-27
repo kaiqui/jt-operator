@@ -61,13 +61,12 @@ class GitHubSettings(BaseSettings):
     enabled: bool = Field(default=False, validation_alias="GITHUB_ENABLED")
 
     # Token de acesso pessoal ou GitHub App token
+    # Deve ter permissão de: contents:write, pull-requests:write no repositório alvo
     token: Optional[SecretStr] = Field(default=None, validation_alias="GITHUB_TOKEN")
 
-    # Repositório alvo (owner/repo)
-    repo_owner: str = Field(default="", validation_alias="GITHUB_REPO_OWNER")
-    repo_name: str = Field(default="", validation_alias="GITHUB_REPO_NAME")
-
     # Branch base para criação de PRs (padrão: develop)
+    # O repositório alvo é extraído dinamicamente de DD_GIT_REPOSITORY_URL
+    # em cada Deployment — não é necessário configurar aqui.
     base_branch: str = Field(default="develop", validation_alias="GITHUB_BASE_BRANCH")
 
     # Timeout e configurações HTTP

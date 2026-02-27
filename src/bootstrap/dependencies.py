@@ -415,13 +415,6 @@ def get_github_repository():
         logger.warning("GITHUB_TOKEN nao configurado — auto-remediacao desabilitada")
         return None
 
-    if not settings.github.repo_owner or not settings.github.repo_name:
-        logger.warning(
-            "GITHUB_REPO_OWNER ou GITHUB_REPO_NAME nao configurados — "
-            "auto-remediacao desabilitada",
-        )
-        return None
-
     client = GitHubAPIClient(
         token=token,
         timeout=settings.github.timeout_seconds,
@@ -431,7 +424,7 @@ def get_github_repository():
     logger.info(
         "GitHubRepository inicializado",
         extra={
-            "repo": f"{settings.github.repo_owner}/{settings.github.repo_name}",
+            # repo_owner/repo_name sao extraidos por Deployment via DD_GIT_REPOSITORY_URL
             "base_branch": settings.github.base_branch,
         },
     )
