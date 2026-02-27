@@ -33,21 +33,18 @@ class KubernetesStatusWriter(StatusWriter):
                     plural=PLURAL,
                     name=name
                 )
-                
-                # 2. Usa optimistic concurrency control com resourceVersion
-                if 'metadata' in current_cr and 'resourceVersion' in current_cr['metadata']:
-                    body['metadata']['resourceVersion'] = current_cr['metadata']['resourceVersion']
-                
-                # 3. Atualiza o status
-                body['status'] = status
-                
+
+                # 2. Usa current_cr (já contém resourceVersion atualizado) como body mutável
+                # Não modificamos o Body do kopf que é imutável
+                current_cr['status'] = status
+
                 api.replace_namespaced_custom_object_status(
                     group=GROUP,
                     version=VERSION,
                     namespace=namespace,
                     plural=PLURAL,
                     name=name,
-                    body=body
+                    body=current_cr
                 )
                 return
                 
@@ -64,7 +61,7 @@ class KubernetesStatusWriter(StatusWriter):
                         logger.warning(
                             f"Conflict ao atualizar status após {max_retries} tentativas",
                             extra={
-                                "name": name,
+                                "resource_name": name,
                                 "namespace": namespace,
                                 "attempt": attempt + 1
                             }

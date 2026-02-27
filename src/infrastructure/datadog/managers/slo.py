@@ -59,7 +59,7 @@ class SLOManager(DatadogClientBase):
         self.logger.info(
             "Criando SLO - Parâmetros recebidos",
             extra={
-                "name": name,
+                "slo_name": name,
                 "thresholds_provided": thresholds is not None,
                 "target_threshold": target_threshold,
                 "warning_threshold": warning_threshold,
@@ -318,8 +318,8 @@ class SLOManager(DatadogClientBase):
             "Atualizando SLO no Datadog",
             extra={
                 "slo_id": slo_id,
-                "name": name,
-                "type": type
+                "slo_name": name,
+                "slo_type": type
             }
         )
 
@@ -396,7 +396,7 @@ class SLOManager(DatadogClientBase):
                 "Body para atualização do SLO",
                 extra={
                     "slo_id": slo_id,
-                    "name": name
+                    "slo_name": name
                 }
             )
 
@@ -406,7 +406,8 @@ class SLOManager(DatadogClientBase):
                 "Chamando update_slo",
                 extra={
                     "func": str(self.slo_api.update_slo),
-                    "slo_id": slo_id
+                    "slo_id": slo_id,
+                    "slo_name": name
                 }
             )
 
