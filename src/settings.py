@@ -54,10 +54,39 @@ class SlackSettings(BaseSettings):
     )
 
 
+class GitHubSettings(BaseSettings):
+    """Configurações para integração com GitHub (remediação automática)."""
+
+    # Habilitar/desabilitar remediação automática via GitHub
+    enabled: bool = Field(default=False, validation_alias="GITHUB_ENABLED")
+
+    # Token de acesso pessoal ou GitHub App token
+    token: Optional[SecretStr] = Field(default=None, validation_alias="GITHUB_TOKEN")
+
+    # Repositório alvo (owner/repo)
+    repo_owner: str = Field(default="", validation_alias="GITHUB_REPO_OWNER")
+    repo_name: str = Field(default="", validation_alias="GITHUB_REPO_NAME")
+
+    # Branch base para criação de PRs (padrão: develop)
+    base_branch: str = Field(default="develop", validation_alias="GITHUB_BASE_BRANCH")
+
+    # Timeout e configurações HTTP
+    timeout_seconds: float = Field(
+        default=30.0, validation_alias="GITHUB_TIMEOUT_SECONDS"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="GITHUB_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
 class Settings(BaseSettings):
     
 
     slack: SlackSettings = Field(default_factory=SlackSettings)
+    github: GitHubSettings = Field(default_factory=GitHubSettings)
 
     # Kubernetes
     kubernetes_namespace: str = Field(default="titlis-system", validation_alias="KUBERNETES_NAMESPACE")
@@ -105,6 +134,11 @@ class Settings(BaseSettings):
     # Scorecard Enricher
     enable_backstage_enrichment: bool = Field(default=False, validation_alias="ENABLE_BACKSTAGE_ENRICHMENT")
     enable_castai_cost_enrichment: bool = Field(default=False, validation_alias="ENABLE_CASTAI_COST_ENRICHMENT")
+
+    # Auto-remediação via GitHub PR
+    enable_auto_remediation: bool = Field(
+        default=False, validation_alias="ENABLE_AUTO_REMEDIATION"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

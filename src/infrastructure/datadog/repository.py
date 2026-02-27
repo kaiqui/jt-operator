@@ -2,6 +2,7 @@ import traceback
 from typing import List, Optional, Dict, Any
 
 from src.domain.models import ServiceDefinition, SLO, SLOType, SLOTimeframe
+from src.domain.github_models import DatadogProfilingMetrics
 from src.application.ports.datadog_port import DatadogPort
 from src.infrastructure.datadog.factory import DatadogManagerFactory
 from src.utils.json_logger import get_logger
@@ -346,5 +347,26 @@ class DatadogRepository(DatadogPort):
                 extra={
                     "response": str(response)[:500]
                 }
+            )
+            return None
+
+    def get_container_metrics(
+        self,
+        deployment_name: str,
+        namespace: str,
+        lookback_hours: int = 1,
+    ) -> Optional[DatadogProfilingMetrics]:
+        """
+        Retorna métricas de profiling (CPU / memória) de um Deployment.
+        Delega para DatadogMetricsManager.
+        Retorna None se não houver dados ou em caso de erro.
+        """
+        try:
+            manager = self.factory.create_manager("metrics")
+            return manager.get_container_metrics(deployment_name, namespace, lookback_hours)
+        except Exception:
+            self.logger.exception(
+                "Erro ao buscar métricas de container",
+                extra={"deployment": deployment_name, "namespace": namespace},
             )
             return None

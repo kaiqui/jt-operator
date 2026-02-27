@@ -13,4 +13,7 @@ class DatadogManagerFactory:
         common_kwargs = {"api_key": self.api_key, "app_key": self.app_key, "site": self.site}
         if manager_name in ("slo", "slo_manager"):
             return SLOManager(**common_kwargs)
+        if manager_name in ("metrics", "metrics_manager"):
+            from src.infrastructure.datadog.managers.metrics import DatadogMetricsManager
+            return DatadogMetricsManager(**common_kwargs)
         raise ValueError(f"Manager Datadog desconhecido: {manager_name}")

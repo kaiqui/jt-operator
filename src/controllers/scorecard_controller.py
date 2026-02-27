@@ -1,23 +1,28 @@
 import kopf
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 from src.controllers.base import BaseController
-from src.bootstrap.dependencies import get_scorecard_service
-from src.domain.slack_models import NotificationSeverity, NotificationChannel
+from src.bootstrap.dependencies import get_remediation_service, get_scorecard_service
+from src.domain.github_models import RemediationIssue, RemediationRequest
+from src.domain.slack_models import NotificationChannel, NotificationSeverity
+from src.application.services.remediation_service import REMEDIABLE_RULE_IDS
+from src.settings import settings
 
 
 class ScorecardController(BaseController):
-    
-    def __init__(self):
+
+    def __init__(self) -> None:
         super().__init__("scorecard")
         self.scorecard_service = get_scorecard_service()
+        self.remediation_service = get_remediation_service()
         self.logger.info(
             "ScorecardController inicializado",
             extra={
                 "scorecard_service_available": self.scorecard_service is not None,
-                "slack_service_available": self.slack_service is not None
-            }
+                "slack_service_available": self.slack_service is not None,
+                "remediation_service_available": self.remediation_service is not None,
+            },
         )
     
     async def on_resource_event(self, body: Dict[str, Any], **kwargs) -> Dict[str, Any]:
@@ -58,9 +63,13 @@ class ScorecardController(BaseController):
                 }
             )
             
+            # Remediação automática via GitHub PR (se habilitada)
+            if self.remediation_service:
+                await self._maybe_create_remediation_pr(scorecard, ctx, body)
+
             # Verifica se deve enviar notificação
             should_notify = self.scorecard_service.should_notify(scorecard)
-            
+
             if should_notify:
                 self.logger.info(
                     "Enviando notificação do scorecard",
@@ -107,6 +116,70 @@ class ScorecardController(BaseController):
             )
             return {"evaluated": False, "error": "Erro ao processar Deployment"}
     
+    async def _maybe_create_remediation_pr(
+        self,
+        scorecard: Any,
+        ctx: Dict[str, Any],
+        resource_body: Dict[str, Any],
+    ) -> None:
+        """
+        Se existirem issues remediáveis (HPA / resources), dispara a criação
+        automática de uma branch + PR no GitHub e notifica o Slack.
+
+        Só executa se o Deployment tiver a env DD_GIT_REPOSITORY_URL.
+        """
+        remediable_issues: List[RemediationIssue] = []
+
+        for pillar_score in scorecard.pillar_scores.values():
+            for validation in pillar_score.validation_results:
+                if not validation.passed and validation.rule_id in REMEDIABLE_RULE_IDS:
+                    remediable_issues.append(
+                        RemediationIssue(
+                            rule_id=validation.rule_id,
+                            rule_name=validation.rule_name,
+                            description=validation.message,
+                            remediation=validation.remediation or "",
+                        )
+                    )
+
+        if not remediable_issues:
+            return
+
+        request = RemediationRequest(
+            resource_name=scorecard.resource_name,
+            namespace=scorecard.resource_namespace,
+            resource_kind=scorecard.resource_kind,
+            issues=remediable_issues,
+            resource_body=resource_body,
+            base_branch=settings.github.base_branch,
+        )
+
+        self.logger.info(
+            "Disparando remediacao automatica",
+            extra={
+                **ctx,
+                "remediable_issues": [i.rule_id for i in remediable_issues],
+            },
+        )
+
+        result = await self.remediation_service.create_remediation_pr(request)
+
+        if result.success and result.pull_request:
+            self.logger.info(
+                "PR de remediacao criado com sucesso",
+                extra={
+                    **ctx,
+                    "pr_number": result.pull_request.number,
+                    "pr_url": result.pull_request.url,
+                    "branch": result.branch_name,
+                },
+            )
+        else:
+            self.logger.warning(
+                "Falha na remediacao automatica",
+                extra={**ctx, "error": result.error},
+            )
+
     async def _send_scorecard_notification(self, body: Dict[str, Any], scorecard: Any) -> bool:
         """Envia notificação do scorecard para o Slack."""
         

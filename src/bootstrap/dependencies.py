@@ -381,9 +381,95 @@ def get_scorecard_service() -> Optional[ScorecardService]:
 @lru_cache()
 def get_slo_service() -> Optional[SLOService]:
     """Retorna instância do SLOService apenas se o controller estiver habilitado."""
-    
+
     if not settings.enable_slo_controller:
         logger.info("SLO controller desabilitado via feature flag")
         return None
     datadog_repo = get_datadog_repository()
     return SLOService(datadog_repo)
+
+
+@lru_cache()
+def get_github_repository():
+    """
+    Retorna instância do GitHubRepository se a integração estiver habilitada.
+
+    Retorna None silenciosamente caso ENABLE_AUTO_REMEDIATION ou GITHUB_ENABLED
+    estejam desabilitados, ou se as credenciais não estiverem configuradas.
+    """
+    from src.infrastructure.github.client import GitHubAPIClient
+    from src.infrastructure.github.repository import GitHubRepository
+
+    if not settings.enable_auto_remediation:
+        logger.info("Auto-remediacao desabilitada via feature flag")
+        return None
+
+    if not settings.github.enabled:
+        logger.info("Integracao GitHub desabilitada via GITHUB_ENABLED")
+        return None
+
+    token = (
+        settings.github.token.get_secret_value() if settings.github.token else None
+    )
+    if not token:
+        logger.warning("GITHUB_TOKEN nao configurado — auto-remediacao desabilitada")
+        return None
+
+    if not settings.github.repo_owner or not settings.github.repo_name:
+        logger.warning(
+            "GITHUB_REPO_OWNER ou GITHUB_REPO_NAME nao configurados — "
+            "auto-remediacao desabilitada",
+        )
+        return None
+
+    client = GitHubAPIClient(
+        token=token,
+        timeout=settings.github.timeout_seconds,
+    )
+    repo = GitHubRepository(client)
+
+    logger.info(
+        "GitHubRepository inicializado",
+        extra={
+            "repo": f"{settings.github.repo_owner}/{settings.github.repo_name}",
+            "base_branch": settings.github.base_branch,
+        },
+    )
+    return repo
+
+
+@lru_cache()
+def get_remediation_service():
+    """
+    Retorna instância do RemediationService se a auto-remediação estiver habilitada.
+
+    Combina GitHubRepository + SlackNotificationService + DatadogRepository
+    no serviço de orquestração.
+    """
+    from src.application.services.remediation_service import RemediationService
+
+    github_repo = get_github_repository()
+    if not github_repo:
+        return None
+
+    slack_service = get_slack_service()
+
+    # DatadogRepository é opcional — se não estiver configurado, as métricas
+    # serão ignoradas e valores padrão serão usados para resources
+    datadog_repo: Optional[DatadogRepository] = None
+    try:
+        datadog_repo = get_datadog_repository()
+    except Exception:
+        logger.warning(
+            "DatadogRepository indisponivel para RemediationService — "
+            "valores de resources padrao serao usados"
+        )
+
+    service = RemediationService(
+        github_port=github_repo,
+        slack_service=slack_service,
+        datadog_repository=datadog_repo,
+    )
+
+    logger.info("RemediationService inicializado")
+    return service
