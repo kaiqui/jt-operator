@@ -1,0 +1,242 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: appscorecards.titlis.io
+spec:
+  group: titlis.io
+  scope: Namespaced
+  names:
+    kind: AppScorecard
+    plural: appscorecards
+    singular: appscorecard
+    shortNames:
+      - asc
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Score
+          type: number
+          jsonPath: .status.overallScore
+        - name: Status
+          type: string
+          jsonPath: .status.complianceStatus
+        - name: Critical
+          type: integer
+          jsonPath: .status.criticalIssues
+        - name: Errors
+          type: integer
+          jsonPath: .status.errorIssues
+        - name: Warnings
+          type: integer
+          jsonPath: .status.warningIssues
+        - name: Evaluated
+          type: date
+          jsonPath: .status.lastEvaluatedAt
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: Identifies the target Kubernetes resource managed by this scorecard.
+              required: ["targetRef"]
+              properties:
+                targetRef:
+                  type: object
+                  description: Reference to the Kubernetes resource being scored.
+                  required: ["apiVersion", "kind", "name", "namespace"]
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+            status:
+              type: object
+              description: Current scorecard state. Managed exclusively by the titlis-operator.
+              properties:
+                overallScore:
+                  type: number
+                  description: Weighted overall score from 0 to 100.
+                complianceStatus:
+                  type: string
+                  enum: ["compliant", "non_compliant", "unknown", "pending"]
+                  description: Derived compliance classification.
+                lastEvaluatedAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp of the last scorecard evaluation.
+                criticalIssues:
+                  type: integer
+                  description: Number of failed checks with critical severity.
+                errorIssues:
+                  type: integer
+                  description: Number of failed checks with error severity.
+                warningIssues:
+                  type: integer
+                  description: Number of failed checks with warning severity.
+                passedChecks:
+                  type: integer
+                  description: Total number of checks that passed.
+                totalChecks:
+                  type: integer
+                  description: Total number of checks evaluated.
+
+                pillars:
+                  type: object
+                  description: Score breakdown per validation pillar.
+                  additionalProperties:
+                    type: object
+                    properties:
+                      score:
+                        type: number
+                      passedChecks:
+                        type: integer
+                      totalChecks:
+                        type: integer
+                      weightedScore:
+                        type: number
+
+                findings:
+                  type: array
+                  description: All validation results (passed and failed) from the scorecard engine.
+                  items:
+                    type: object
+                    properties:
+                      ruleId:
+                        type: string
+                        description: Rule identifier (e.g. RES-001, SEC-003).
+                      ruleName:
+                        type: string
+                      pillar:
+                        type: string
+                        enum: ["resilience", "security", "cost", "performance", "operational", "compliance"]
+                      passed:
+                        type: boolean
+                      severity:
+                        type: string
+                        enum: ["critical", "error", "warning", "info", "optional"]
+                      weight:
+                        type: number
+                      message:
+                        type: string
+                      actualValue:
+                        type: string
+                        nullable: true
+                      expectedValue:
+                        type: string
+                        nullable: true
+                      remediation:
+                        type: string
+                        nullable: true
+                      timestamp:
+                        type: string
+                        format: date-time
+
+                backstage:
+                  type: object
+                  nullable: true
+                  description: Ownership metadata fetched from Backstage service catalog.
+                  properties:
+                    entityRef:
+                      type: string
+                    owner:
+                      type: string
+                    squad:
+                      type: string
+                    tier:
+                      type: string
+                      nullable: true
+                    system:
+                      type: string
+                      nullable: true
+                    sloTargetOverride:
+                      type: number
+                      nullable: true
+                    fetchedAt:
+                      type: string
+                      format: date-time
+
+                cost:
+                  type: object
+                  nullable: true
+                  description: Cost and efficiency data from CAST AI.
+                  properties:
+                    monthlyCostUsd:
+                      type: number
+                    monthlySavingsUsd:
+                      type: number
+                    potentialSavingsUsd:
+                      type: number
+                    cpuEfficiencyPct:
+                      type: number
+                      nullable: true
+                    memoryEfficiencyPct:
+                      type: number
+                      nullable: true
+                    rightsizingRecommendations:
+                      type: array
+                      items:
+                        type: string
+
+                remediation:
+                  type: object
+                  nullable: true
+                  description: GitHub auto-remediation PR metadata.
+                  properties:
+                    prNumber:
+                      type: integer
+                    prUrl:
+                      type: string
+                    prBranch:
+                      type: string
+                    status:
+                      type: string
+                      enum: ["open", "merged", "closed", "unknown"]
+                    createdAt:
+                      type: string
+                      format: date-time
+                    issuesFixed:
+                      type: array
+                      items:
+                        type: string
+
+                notification:
+                  type: object
+                  nullable: true
+                  description: Last Slack notification metadata for this resource.
+                  properties:
+                    lastSentAt:
+                      type: string
+                      format: date-time
+                    lastSeverity:
+                      type: string
+                      enum: ["info", "warning", "error", "critical"]
+
+                conditions:
+                  type: array
+                  description: Standard Kubernetes conditions representing the operator reconciliation state.
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string

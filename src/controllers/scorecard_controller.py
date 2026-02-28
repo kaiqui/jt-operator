@@ -1,12 +1,18 @@
 import kopf
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from src.controllers.base import BaseController
-from src.bootstrap.dependencies import get_remediation_service, get_scorecard_service
+from src.bootstrap.dependencies import (
+    get_remediation_service,
+    get_scorecard_service,
+    get_appscorecard_writer,
+)
 from src.domain.github_models import RemediationIssue, RemediationRequest
 from src.domain.slack_models import NotificationChannel, NotificationSeverity
+from src.domain.models import ResourceScorecard
 from src.application.services.remediation_service import REMEDIABLE_RULE_IDS
+from src.application.services.namespace_notification_buffer import NamespaceNotificationBuffer
 from src.settings import settings
 
 
@@ -16,40 +22,41 @@ class ScorecardController(BaseController):
         super().__init__("scorecard")
         self.scorecard_service = get_scorecard_service()
         self.remediation_service = get_remediation_service()
+        self.appscorecard_writer = get_appscorecard_writer()
+        self._notification_buffer = NamespaceNotificationBuffer(
+            digest_interval_minutes=15
+        )
         self.logger.info(
             "ScorecardController inicializado",
             extra={
                 "scorecard_service_available": self.scorecard_service is not None,
                 "slack_service_available": self.slack_service is not None,
                 "remediation_service_available": self.remediation_service is not None,
+                "appscorecard_writer_available": self.appscorecard_writer is not None,
             },
         )
-    
+
     async def on_resource_event(self, body: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         ctx = self._get_resource_context(body)
-        event_type = kwargs.get('event_type', 'unknown')
-
+        event_type = kwargs.get("event_type", "unknown")
         namespace = ctx["resource_namespace"]
-        
-        # Verifica se o namespace está na lista de exclusão
+
         if self._is_namespace_excluded(namespace):
             self.logger.debug(
                 f"Ignorando Deployment no namespace excluído: {namespace}",
-                extra=ctx
+                extra=ctx,
             )
             return {"ignored": True, "reason": f"Namespace {namespace} está na lista de exclusão"}
-        
+
         self.logger.info(f"Deployment {event_type}", extra=ctx)
 
         try:
-            # Avalia o deployment com o scorecard
             scorecard = self.scorecard_service.evaluate_resource(
                 ctx["resource_namespace"],
                 ctx["resource_name"],
-                ctx["resource_kind"]
+                ctx["resource_kind"],
             )
-            
-            # Log do scorecard
+
             self.logger.info(
                 "Scorecard avaliado",
                 extra={
@@ -59,44 +66,40 @@ class ScorecardController(BaseController):
                     "error_issues": scorecard.error_issues,
                     "warning_issues": scorecard.warning_issues,
                     "passed_checks": scorecard.passed_checks,
-                    "total_checks": scorecard.total_checks
-                }
+                    "total_checks": scorecard.total_checks,
+                },
             )
-            
-            # Remediação automática via GitHub PR (se habilitada)
+
+            # Persists scorecard in AppScorecard CRD (create or update).
+            remediation_pr_meta: Optional[Dict[str, Any]] = None
+
+            # Auto-remediation via GitHub PR (if enabled).
             if self.remediation_service:
-                await self._maybe_create_remediation_pr(scorecard, ctx, body)
+                remediation_pr_meta = await self._maybe_create_remediation_pr(
+                    scorecard, ctx, body
+                )
 
-            # Verifica se deve enviar notificação
+            if self.appscorecard_writer:
+                try:
+                    self.appscorecard_writer.upsert(
+                        scorecard=scorecard,
+                        deployment_body=body,
+                        remediation_pr=remediation_pr_meta,
+                    )
+                except Exception:
+                    # CRD write failure must not block the operator loop.
+                    self.logger.exception(
+                        "Falha ao escrever AppScorecard CRD",
+                        extra=ctx,
+                    )
+
+            # Buffer scorecard and maybe send namespace digest.
             should_notify = self.scorecard_service.should_notify(scorecard)
-
             if should_notify:
-                self.logger.info(
-                    "Enviando notificação do scorecard",
-                    extra={
-                        **ctx,
-                        "overall_score": scorecard.overall_score,
-                        "notification_severity": self.scorecard_service.get_notification_severity(scorecard)
-                    }
-                )
-                
-                # Envia notificação para o Slack
-                success = await self._send_scorecard_notification(body, scorecard)
-                
-                if success:
-                    self.logger.info("Notificação do scorecard enviada com sucesso", extra=ctx)
-                else:
-                    self.logger.warning("Falha ao enviar notificação do scorecard", extra=ctx)
-            else:
-                self.logger.debug(
-                    "Notificação do scorecard não necessária",
-                    extra={
-                        **ctx,
-                        "overall_score": scorecard.overall_score,
-                        "should_notify": should_notify
-                    }
-                )
-            
+                to_send = self._notification_buffer.add_and_maybe_flush(scorecard)
+                if to_send is not None:
+                    await self._send_namespace_digest(namespace, to_send)
+
             return {
                 "evaluated": True,
                 "resource_name": ctx["resource_name"],
@@ -106,27 +109,25 @@ class ScorecardController(BaseController):
                 "error_issues": scorecard.error_issues,
                 "warning_issues": scorecard.warning_issues,
                 "should_notify": should_notify,
-                "notification_severity": self.scorecard_service.get_notification_severity(scorecard) if should_notify else None
             }
-            
+
         except Exception:
-            self.logger.exception(
-                "Erro ao processar Deployment",
-                extra=ctx
-            )
+            self.logger.exception("Erro ao processar Deployment", extra=ctx)
             return {"evaluated": False, "error": "Erro ao processar Deployment"}
-    
+
+    # ------------------------------------------------------------------
+    # Auto-remediation
+    # ------------------------------------------------------------------
+
     async def _maybe_create_remediation_pr(
         self,
         scorecard: Any,
         ctx: Dict[str, Any],
         resource_body: Dict[str, Any],
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         """
-        Se existirem issues remediáveis (HPA / resources), dispara a criação
-        automática de uma branch + PR no GitHub e notifica o Slack.
-
-        Só executa se o Deployment tiver a env DD_GIT_REPOSITORY_URL.
+        If there are remediable issues (HPA / resources), create a GitHub PR.
+        Returns PR metadata dict on success, None otherwise.
         """
         remediable_issues: List[RemediationIssue] = []
 
@@ -143,7 +144,7 @@ class ScorecardController(BaseController):
                     )
 
         if not remediable_issues:
-            return
+            return None
 
         request = RemediationRequest(
             resource_name=scorecard.resource_name,
@@ -156,230 +157,197 @@ class ScorecardController(BaseController):
 
         self.logger.info(
             "Disparando remediacao automatica",
-            extra={
-                **ctx,
-                "remediable_issues": [i.rule_id for i in remediable_issues],
-            },
+            extra={**ctx, "remediable_issues": [i.rule_id for i in remediable_issues]},
         )
 
         result = await self.remediation_service.create_remediation_pr(request)
 
         if result.success and result.pull_request:
+            pr = result.pull_request
             self.logger.info(
                 "PR de remediacao criado com sucesso",
                 extra={
                     **ctx,
-                    "pr_number": result.pull_request.number,
-                    "pr_url": result.pull_request.url,
+                    "pr_number": pr.number,
+                    "pr_url": pr.url,
                     "branch": result.branch_name,
                 },
             )
+            return {
+                "prNumber": pr.number,
+                "prUrl": pr.url,
+                "prBranch": result.branch_name,
+                "status": "open",
+                "createdAt": pr.created_at.isoformat(),
+                "issuesFixed": [i.rule_id for i in remediable_issues],
+            }
         else:
             self.logger.warning(
                 "Falha na remediacao automatica",
                 extra={**ctx, "error": result.error},
             )
+            return None
 
-    async def _send_scorecard_notification(self, body: Dict[str, Any], scorecard: Any) -> bool:
-        """Envia notificação do scorecard para o Slack."""
-        
-        if not self.slack_service:
-            self.logger.warning("Slack service não disponível para enviar notificação do scorecard")
-            return False
-        
-        # Formata a mensagem
-        title = self._format_scorecard_title(scorecard)
-        message = self._format_scorecard_message(scorecard)
-        severity = self._determine_scorecard_severity(scorecard)
-        
-        # Cria campos adicionais para o Slack
-        additional_fields = self._create_scorecard_fields(scorecard)
-        
-        # Envia a notificação
-        return await self._send_slack_notification_safe(
+    # ------------------------------------------------------------------
+    # Namespace digest notification (Decision 3 — C)
+    # ------------------------------------------------------------------
+
+    async def _send_namespace_digest(
+        self,
+        namespace: str,
+        scorecards: List[ResourceScorecard],
+    ) -> None:
+        """Send a single Slack message summarising all apps in *namespace*."""
+        if not self.slack_service or not scorecards:
+            return
+
+        title, message, severity = self._format_namespace_digest(namespace, scorecards)
+
+        success = await self._send_slack_notification_safe(
             title=title,
             message=message,
             severity=severity,
-            channel=NotificationChannel.ALERTS,  # Usa canal de alertas para scorecards
-            namespace=scorecard.resource_namespace,
-            pod_name=scorecard.resource_name,
-            additional_fields=additional_fields
+            channel=NotificationChannel.ALERTS,
+            namespace=namespace,
+            pod_name=None,
         )
-    
-    def _format_scorecard_title(self, scorecard: Any) -> str:
-        """Formata o título da notificação do scorecard."""
-        
-        emoji = "🔴"
-        if scorecard.overall_score >= 90:
-            emoji = "🟢"
-        elif scorecard.overall_score >= 70:
-            emoji = "🟡"
-        elif scorecard.overall_score >= 50:
-            emoji = "🟠"
-        
-        return f"{emoji} Scorecard: {scorecard.resource_name} ({scorecard.overall_score:.1f}/100)"
-    
-    def _format_scorecard_message(self, scorecard: Any) -> str:
-        """Formata a mensagem do scorecard."""
-        
-        message = f"*📊 SCORECARD - {scorecard.resource_name}*\n"
-        message += f"*Namespace:* {scorecard.resource_namespace}\n"
-        message += f"*Score Geral:* {scorecard.overall_score:.1f}/100\n"
-        message += f"*Status:* {self._get_score_status(scorecard.overall_score)}\n\n"
-        
-        # Issues
-        if scorecard.critical_issues > 0:
-            message += f"🔴 *Issues Críticas:* {scorecard.critical_issues}\n"
-        if scorecard.error_issues > 0:
-            message += f"❌ *Issues de Erro:* {scorecard.error_issues}\n"
-        if scorecard.warning_issues > 0:
-            message += f"⚠️ *Warnings:* {scorecard.warning_issues}\n"
-        
-        message += f"✅ *Checks Passados:* {scorecard.passed_checks}/{scorecard.total_checks}\n\n"
-        
-        # Detalhes por pilar com TODOS os itens encontrados
-        message += "*🏛️ DETALHES COMPLETOS POR PILAR:*\n"
-        
-        # Primeiro, vamos coletar todas as validações que falharam
-        all_failed_validations = []
-        
-        for pillar, pillar_score in scorecard.pillar_scores.items():
-            pillar_emoji = self._get_pillar_emoji(pillar)
-            message += f"\n{pillar_emoji} *{pillar.value.upper()}*: {pillar_score.score:.1f}/100 "
-            message += f"({pillar_score.passed_checks}/{pillar_score.total_checks} checks)\n"
-            
-            # Lista TODAS as validações para este pilar
-            for validation in pillar_score.validation_results:
-                if not validation.passed:
-                    # Adiciona à lista geral para resumo
-                    all_failed_validations.append(validation)
-                    
-                    # Adiciona detalhe específico
-                    severity_emoji = {
-                        "critical": "🔴",
-                        "error": "❌",
-                        "warning": "⚠️",
-                        "info": "ℹ️",
-                        "optional": "🔵"
-                    }.get(validation.severity.value, "⚪")
-                    
-                    # Limita o tamanho da mensagem para não exceder limite do Slack
-                    clean_message = validation.message
-                    if len(clean_message) > 150:
-                        clean_message = clean_message[:147] + "..."
-                    
-                    message += f"  {severity_emoji} {validation.rule_name}: {clean_message}\n"
-                    
-                    # Adiciona valor atual e esperado se disponível
-                    if validation.actual_value is not None:
-                        message += f"    *Valor Atual:* {validation.actual_value}\n"
-                    if validation.expected_value is not None:
-                        message += f"    *Valor Esperado:* {validation.expected_value}\n"
-                    
-                    # Adiciona recomendação se disponível
-                    if validation.remediation:
-                        clean_remediation = validation.remediation
-                        if len(clean_remediation) > 100:
-                            clean_remediation = clean_remediation[:97] + "..."
-                        message += f"    *Recomendação:* {clean_remediation}\n"
-        
-        # Se houver muitas validações, adiciona um resumo
-        if len(all_failed_validations) > 15:
-            message = message[:3000] + "\n\n... (mensagem truncada devido ao limite do Slack)"
+
+        if success and self.appscorecard_writer:
+            # Update notification metadata in each AppScorecard that was included.
+            for sc in scorecards:
+                try:
+                    self.appscorecard_writer.update_notification(
+                        namespace=sc.resource_namespace,
+                        name=sc.resource_name,
+                        severity=severity.value,
+                    )
+                except Exception:
+                    pass  # Non-critical
+
+        if success:
+            self.logger.info(
+                "Namespace digest enviado",
+                extra={"namespace": namespace, "apps_count": len(scorecards)},
+            )
         else:
-            # Adiciona contagem resumida
-            message += f"\n*📋 RESUMO DE ISSUES:*\n"
-            
-            critical_count = sum(1 for v in all_failed_validations if v.severity.value == "critical")
-            error_count = sum(1 for v in all_failed_validations if v.severity.value == "error")
-            warning_count = sum(1 for v in all_failed_validations if v.severity.value == "warning")
-            
-            if critical_count > 0:
-                message += f"🔴 *Críticas:* {critical_count}\n"
-            if error_count > 0:
-                message += f"❌ *Erros:* {error_count}\n"
-            if warning_count > 0:
-                message += f"⚠️ *Warnings:* {warning_count}\n"
-        
-        # Recomendações baseadas no score
-        message += f"\n*💡 RECOMENDAÇÕES PRINCIPAIS:*\n"
-        
-        # Primeiro, prioriza issues críticas
-        critical_validations = [v for v in all_failed_validations if v.severity.value == "critical"]
-        if critical_validations:
-            message += "1. 🔴 *CORRIGIR ISSUES CRÍTICAS IMEDIATAMENTE:*\n"
-            for i, validation in enumerate(critical_validations[:3], 1):
-                message += f"   {i}. {validation.rule_name}\n"
-            message += "\n"
-        
-        # Depois, issues de erro
-        error_validations = [v for v in all_failed_validations if v.severity.value == "error"]
-        if error_validations:
-            message += "2. ❌ *RESOLVER ISSUES DE ERRO:*\n"
-            for i, validation in enumerate(error_validations[:3], 1):
-                message += f"   {i}. {validation.rule_name}\n"
-            message += "\n"
-        
-        # Finalmente, recomendações gerais baseadas no score
-        if scorecard.overall_score < 70:
-            message += "3. ⚠️ *Revisar configurações de segurança e resiliência*\n"
-            message += "4. 📊 *Monitorar após correções*\n"
-            message += "5. 🔄 *Reavaliar em 24 horas*\n"
-        elif scorecard.overall_score < 80:
-            message += "3. ⚠️ *Corrigir issues de erro e warnings prioritários*\n"
-            message += "4. 🛡️ *Melhorar configurações de segurança*\n"
-            message += "5. 🔄 *Reavaliar após ajustes*\n"
-        elif scorecard.overall_score < 90:
-            message += "3. ✅ *Manter boas práticas atuais*\n"
-            message += "4. ⚡ *Otimizar performance onde possível*\n"
-            message += "5. 📈 *Continuar monitoramento*\n"
+            self.logger.warning(
+                "Falha ao enviar namespace digest",
+                extra={"namespace": namespace},
+            )
+
+    def _format_namespace_digest(
+        self,
+        namespace: str,
+        scorecards: List[ResourceScorecard],
+    ):
+        """
+        Build a compact digest message for all apps in a namespace.
+
+        Returns (title, message, severity).
+        """
+        # Sort: worst first (critical → low score)
+        sorted_sc = sorted(
+            scorecards,
+            key=lambda s: (
+                -s.critical_issues,
+                -s.error_issues,
+                s.overall_score,
+            ),
+        )
+
+        total = len(sorted_sc)
+        total_critical = sum(s.critical_issues for s in sorted_sc)
+        total_errors = sum(s.error_issues for s in sorted_sc)
+        total_warnings = sum(s.warning_issues for s in sorted_sc)
+
+        # Overall severity of the digest
+        if total_critical > 0 or any(s.overall_score < 70 for s in sorted_sc):
+            severity = NotificationSeverity.CRITICAL
+            header_emoji = "🔴"
+        elif total_errors > 0 or any(s.overall_score < 80 for s in sorted_sc):
+            severity = NotificationSeverity.ERROR
+            header_emoji = "🟠"
+        elif total_warnings > 0 or any(s.overall_score < 90 for s in sorted_sc):
+            severity = NotificationSeverity.WARNING
+            header_emoji = "🟡"
         else:
-            message += "3. 🏆 *Excelente score! Manter configurações*\n"
-            message += "4. 📊 *Continuar monitoramento regular*\n"
-            message += "5. 🔄 *Revisar periodicamente*\n"
-        
-        # Limita o tamanho total da mensagem para o Slack (3000 caracteres)
+            severity = NotificationSeverity.INFO
+            header_emoji = "🟢"
+
+        title = f"{header_emoji} Scorecard Digest — namespace: {namespace}"
+
+        # Summary line
+        summary_parts = [f"*{total}* app{'s' if total != 1 else ''} avaliado{'s' if total != 1 else ''}"]
+        if total_critical:
+            summary_parts.append(f"🔴 {total_critical} crítico{'s' if total_critical != 1 else ''}")
+        if total_errors:
+            summary_parts.append(f"❌ {total_errors} erro{'s' if total_errors != 1 else ''}")
+        if total_warnings:
+            summary_parts.append(f"⚠️ {total_warnings} warning{'s' if total_warnings != 1 else ''}")
+        summary_line = " | ".join(summary_parts)
+
+        lines = [summary_line, ""]
+
+        # Per-app summary rows
+        for sc in sorted_sc:
+            emoji = self._score_emoji(sc.overall_score)
+            name_padded = sc.resource_name[:35].ljust(35)
+            score_str = f"{sc.overall_score:5.1f}/100"
+            issue_parts = []
+            if sc.critical_issues:
+                issue_parts.append(f"🔴 {sc.critical_issues} crít.")
+            if sc.error_issues:
+                issue_parts.append(f"❌ {sc.error_issues} erros")
+            if sc.warning_issues:
+                issue_parts.append(f"⚠️ {sc.warning_issues} warn.")
+            if not issue_parts:
+                issue_parts.append("✅ ok")
+            issues_str = "  ".join(issue_parts)
+            lines.append(f"{emoji} `{name_padded}` {score_str}  {issues_str}")
+
+        # Top critical/error findings across all apps
+        top_issues: List[str] = []
+        for sc in sorted_sc:
+            for ps in sc.pillar_scores.values():
+                for v in ps.validation_results:
+                    if not v.passed and v.severity.value in ("critical", "error"):
+                        top_issues.append(
+                            f"• *{sc.resource_name}*: [{v.rule_id}] {v.rule_name}"
+                        )
+            if len(top_issues) >= 5:
+                break
+
+        if top_issues:
+            lines += ["", "*Issues críticos/errors:*"] + top_issues[:5]
+
+        # kubectl hint
+        lines += [
+            "",
+            f"`kubectl get appscorecard -n {namespace}`",
+        ]
+
+        message = "\n".join(lines)
+        # Slack hard limit
         if len(message) > 3000:
             message = message[:2997] + "..."
-        
-        return message
-        
-    def _create_scorecard_fields(self, scorecard: Any) -> list:
-        """Cria campos adicionais para a notificação do Slack."""
-        
-        fields = [
-            {"title": "Score", "value": f"{scorecard.overall_score:.1f}/100", "short": True},
-            {"title": "Status", "value": self._get_score_status(scorecard.overall_score), "short": True},
-            {"title": "Críticas", "value": str(scorecard.critical_issues), "short": True},
-            {"title": "Erros", "value": str(scorecard.error_issues), "short": True},
-            {"title": "Warnings", "value": str(scorecard.warning_issues), "short": True},
-            {"title": "Passed", "value": f"{scorecard.passed_checks}/{scorecard.total_checks}", "short": True},
-        ]
-        
-        # Adiciona scores por pilar se disponíveis
-        for pillar, pillar_score in scorecard.pillar_scores.items():
-            fields.append({
-                "title": pillar.value[:15],  # Limita tamanho
-                "value": f"{pillar_score.score:.1f}/100",
-                "short": True
-            })
-        
-        return fields
-    
-    def _determine_scorecard_severity(self, scorecard: Any) -> NotificationSeverity:
-        """Determina a severidade com base no score."""
-        
-        if scorecard.overall_score < 70 or scorecard.critical_issues > 0:
-            return NotificationSeverity.CRITICAL
-        elif scorecard.overall_score < 80 or scorecard.error_issues > 0:
-            return NotificationSeverity.ERROR
-        elif scorecard.overall_score < 90 or scorecard.warning_issues > 0:
-            return NotificationSeverity.WARNING
+
+        return title, message, severity
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _score_emoji(self, score: float) -> str:
+        if score >= 90:
+            return "🟢"
+        elif score >= 80:
+            return "🟡"
+        elif score >= 70:
+            return "🟠"
         else:
-            return NotificationSeverity.INFO
-    
+            return "🔴"
+
     def _get_score_status(self, score: float) -> str:
-        """Retorna status textual do score."""
         if score >= 90:
             return "Excelente"
         elif score >= 80:
@@ -390,39 +358,27 @@ class ScorecardController(BaseController):
             return "Insatisfatório"
         else:
             return "Crítico"
-    
-    def _get_pillar_emoji(self, pillar) -> str:
-        """Retorna emoji para cada pilar."""
-        emoji_map = {
-            "resilience": "🛡️",
-            "security": "🔐",
-            "performance": "⚡",
-            "cost": "💰",
-            "operational": "🛠️",
-            "compliance": "📋"
-        }
-        return emoji_map.get(pillar.value, "📊")
 
 
 # Singleton global
 scorecard_controller = ScorecardController()
 
 
-# Handlers do Kopf
-@kopf.on.create('apps', 'v1', 'deployments')
+# Kopf handlers
+@kopf.on.create("apps", "v1", "deployments")
 async def on_deployment_create(body, **kwargs):
     return await scorecard_controller.on_resource_event(body, event_type="create", **kwargs)
 
 
-@kopf.on.update('apps', 'v1', 'deployments')
+@kopf.on.update("apps", "v1", "deployments")
 async def on_deployment_update(body, **kwargs):
     return await scorecard_controller.on_resource_event(body, event_type="update", **kwargs)
 
 
-@kopf.on.delete('apps', 'v1', 'deployments')
+@kopf.on.delete("apps", "v1", "deployments")
 async def on_deployment_delete(body, **kwargs):
     ctx = scorecard_controller._get_resource_context(body)
-    
+
     await scorecard_controller._send_slack_notification_safe(
         title=f"🗑️ Deployment Deletado: {ctx['resource_name']}",
         message=(
@@ -434,9 +390,8 @@ async def on_deployment_delete(body, **kwargs):
         ),
         severity=NotificationSeverity.WARNING,
         channel=NotificationChannel.ALERTS,
-        namespace=ctx["resource_namespace"]
+        namespace=ctx["resource_namespace"],
     )
-    
+
     scorecard_controller.logger.warning("Deployment deleted", extra=ctx)
     return {"deleted": True}
-

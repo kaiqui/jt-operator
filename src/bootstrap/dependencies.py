@@ -5,6 +5,7 @@ from functools import lru_cache
 
 from src.settings import settings
 from src.infrastructure.kubernetes.k8s_status_writer import KubernetesStatusWriter
+from src.infrastructure.kubernetes.appscorecard_writer import AppScorecardWriter
 from src.infrastructure.datadog.repository import DatadogRepository
 from src.infrastructure.slack.repository import SlackRepository
 from src.application.services.slo_service import SLOService
@@ -151,6 +152,19 @@ def get_slo_metrics_service() -> Optional[SLOMetricsService]:
 @lru_cache()
 def get_status_writer():
     return KubernetesStatusWriter()
+
+
+@lru_cache()
+def get_appscorecard_writer() -> Optional[AppScorecardWriter]:
+    """
+    Returns a singleton AppScorecardWriter.
+    Only active when the scorecard controller is enabled.
+    """
+    if not settings.enable_scorecard_controller:
+        return None
+    writer = AppScorecardWriter()
+    logger.info("AppScorecardWriter inicializado")
+    return writer
 
 @lru_cache()
 def get_datadog_credentials() -> tuple:
