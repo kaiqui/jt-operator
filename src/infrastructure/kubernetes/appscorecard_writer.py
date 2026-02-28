@@ -89,19 +89,19 @@ class AppScorecardWriter:
             self._update(existing, body, namespace, name)
             logger.debug(
                 "AppScorecard atualizado",
-                extra={"name": name, "namespace": namespace, "score": scorecard.overall_score},
+                extra={"resource_name": name, "namespace": namespace, "score": scorecard.overall_score},
             )
         except ApiException as exc:
             if exc.status == 404:
                 self._create(body, namespace, name)
                 logger.info(
                     "AppScorecard criado",
-                    extra={"name": name, "namespace": namespace, "score": scorecard.overall_score},
+                    extra={"resource_name": name, "namespace": namespace, "score": scorecard.overall_score},
                 )
             else:
                 logger.error(
                     "Erro ao fazer upsert do AppScorecard",
-                    extra={"name": name, "namespace": namespace, "status": exc.status},
+                    extra={"resource_name": name, "namespace": namespace, "status": exc.status},
                 )
                 raise
 
@@ -143,7 +143,7 @@ class AppScorecardWriter:
             # block or raise.
             logger.warning(
                 "Falha ao atualizar notification status no AppScorecard",
-                extra={"name": name, "namespace": namespace},
+                extra={"resource_name": name, "namespace": namespace},
             )
 
     # ------------------------------------------------------------------

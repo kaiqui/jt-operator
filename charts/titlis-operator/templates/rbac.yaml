@@ -26,6 +26,8 @@ rules:
     resources:
       - sloconfigs
       - sloconfigs/status
+      - appscorecards
+      - appscorecards/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Leader election
