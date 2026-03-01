@@ -44,8 +44,8 @@ spec:
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: titlis-github-keys
-                  key: token
+                  name: titlis-datadog-keys
+                  key: github-token
                   optional: true
 
             # ── CAST AI (secret opcional) ───────────────────────────────────

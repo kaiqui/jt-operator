@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from src.controllers.base import BaseController
 from src.bootstrap.dependencies import (
     get_remediation_service,
+    get_remediation_writer,
     get_scorecard_service,
     get_appscorecard_writer,
 )
@@ -22,6 +23,7 @@ class ScorecardController(BaseController):
         super().__init__("scorecard")
         self.scorecard_service = get_scorecard_service()
         self.remediation_service = get_remediation_service()
+        self.remediation_writer = get_remediation_writer()
         self.appscorecard_writer = get_appscorecard_writer()
         self._notification_buffer = NamespaceNotificationBuffer(
             digest_interval_minutes=15
@@ -78,6 +80,8 @@ class ScorecardController(BaseController):
                 remediation_pr_meta = await self._maybe_create_remediation_pr(
                     scorecard, ctx, body
                 )
+                if remediation_pr_meta and self.remediation_writer:
+                    self._record_remediation(remediation_pr_meta, ctx, body)
 
             if self.appscorecard_writer:
                 try:
@@ -187,6 +191,39 @@ class ScorecardController(BaseController):
                 extra={**ctx, "error": result.error},
             )
             return None
+
+    # ------------------------------------------------------------------
+    # Remediation audit record
+    # ------------------------------------------------------------------
+
+    def _record_remediation(
+        self,
+        pr_meta: Dict[str, Any],
+        ctx: Dict[str, Any],
+        deployment_body: Dict[str, Any],
+    ) -> None:
+        """
+        Persist an AppRemediation CRD for the given PR.  Non-blocking:
+        failure is logged but never propagates to the caller.
+        """
+        try:
+            meta = deployment_body.get("metadata", {})
+            issues = [
+                {"ruleId": rule_id, "ruleName": rule_id}
+                for rule_id in pr_meta.get("issuesFixed", [])
+            ]
+            self.remediation_writer.record(
+                namespace=ctx["resource_namespace"],
+                deployment_name=ctx["resource_name"],
+                deployment_uid=meta.get("uid", ""),
+                pr_meta=pr_meta,
+                issues=issues,
+            )
+        except Exception:
+            self.logger.exception(
+                "Falha ao registrar AppRemediation CRD",
+                extra=ctx,
+            )
 
     # ------------------------------------------------------------------
     # Namespace digest notification (Decision 3 — C)

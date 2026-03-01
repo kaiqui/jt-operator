@@ -81,11 +81,49 @@ class GitHubSettings(BaseSettings):
     )
 
 
+class RemediationSettings(BaseSettings):
+    """Defaults de resources usados quando métricas do Datadog não estão disponíveis."""
+
+    default_cpu_request: str = Field(
+        default="100m", validation_alias="REMEDIATION_DEFAULT_CPU_REQUEST"
+    )
+    default_cpu_limit: str = Field(
+        default="500m", validation_alias="REMEDIATION_DEFAULT_CPU_LIMIT"
+    )
+    default_memory_request: str = Field(
+        default="128Mi", validation_alias="REMEDIATION_DEFAULT_MEMORY_REQUEST"
+    )
+    default_memory_limit: str = Field(
+        default="512Mi", validation_alias="REMEDIATION_DEFAULT_MEMORY_LIMIT"
+    )
+
+    # Defaults de HPA usados quando não há HPA configurado ou como mínimo garantido
+    hpa_min_replicas: int = Field(
+        default=2, validation_alias="REMEDIATION_HPA_MIN_REPLICAS"
+    )
+    hpa_max_replicas: int = Field(
+        default=10, validation_alias="REMEDIATION_HPA_MAX_REPLICAS"
+    )
+    hpa_cpu_utilization: int = Field(
+        default=70, validation_alias="REMEDIATION_HPA_CPU_UTILIZATION"
+    )
+    hpa_memory_utilization: int = Field(
+        default=80, validation_alias="REMEDIATION_HPA_MEMORY_UTILIZATION"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="REMEDIATION_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
 class Settings(BaseSettings):
     
 
     slack: SlackSettings = Field(default_factory=SlackSettings)
     github: GitHubSettings = Field(default_factory=GitHubSettings)
+    remediation: RemediationSettings = Field(default_factory=RemediationSettings)
 
     # Kubernetes
     kubernetes_namespace: str = Field(default="titlis-system", validation_alias="KUBERNETES_NAMESPACE")

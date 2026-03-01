@@ -21,6 +21,7 @@ from io import StringIO
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.application.ports.github_port import GitHubPort
+from src.settings import RemediationSettings
 from src.application.services.slack_service import SlackNotificationService
 from src.domain.github_models import (
     DatadogProfilingMetrics,
@@ -39,6 +40,59 @@ from src.domain.slack_models import (
 from src.utils.json_logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ------------------------------------------------------------------
+# Helpers de parse para comparação de recursos Kubernetes
+# ------------------------------------------------------------------
+
+def _parse_cpu_millicores(value: str) -> int:
+    """Converte string de CPU Kubernetes para millicores (ex: '500m' → 500, '1' → 1000)."""
+    v = str(value).strip()
+    if v.endswith("m"):
+        return int(float(v[:-1]))
+    return int(float(v) * 1000)
+
+
+def _parse_memory_mib(value: str) -> int:
+    """Converte string de memória Kubernetes para MiB (ex: '256Mi' → 256, '1Gi' → 1024)."""
+    v = str(value).strip()
+    if v.endswith("Gi"):
+        return int(float(v[:-2]) * 1024)
+    if v.endswith("Mi"):
+        return int(float(v[:-2]))
+    if v.endswith("G"):
+        return int(float(v[:-1]) * 1024)
+    if v.endswith("M"):
+        return int(float(v[:-1]))
+    if v.endswith("Ki"):
+        return max(1, int(float(v[:-2]) // 1024))
+    # bytes
+    return max(1, int(float(v) / 1_048_576))
+
+
+def _keep_max(current: str, suggested: str, parser) -> str:
+    """Retorna o maior valor entre current e suggested.
+
+    Se o parse falhar por qualquer razão, retorna suggested para não bloquear a remediação.
+    """
+    try:
+        return suggested if parser(suggested) >= parser(current) else current
+    except (ValueError, TypeError):
+        return suggested
+
+
+def _extract_hpa_utilization(metrics: List[Dict[str, Any]], resource_name: str) -> Optional[int]:
+    """Extrai o averageUtilization atual de uma métrica de HPA por nome de recurso."""
+    for m in (metrics or []):
+        if m.get("type") == "Resource":
+            resource = m.get("resource", {})
+            if resource.get("name") == resource_name:
+                target = resource.get("target", {})
+                if target.get("type") == "Utilization":
+                    return target.get("averageUtilization")
+    return None
+
 
 # IDs de regras que podem ser remediadas automaticamente
 _HPA_RULE_IDS = frozenset({"RES-007", "RES-008", "PERF-002"})
@@ -69,10 +123,12 @@ class RemediationService:
         github_port: GitHubPort,
         slack_service: Optional[SlackNotificationService] = None,
         datadog_repository: Optional[Any] = None,  # DatadogRepository
+        remediation_settings: Optional[RemediationSettings] = None,
     ) -> None:
         self._github = github_port
         self._slack = slack_service
         self._datadog = datadog_repository
+        self._remediation_settings = remediation_settings or RemediationSettings()
         self.logger = get_logger(self.__class__.__name__)
         # Trava em memória: evita execuções concorrentes para o mesmo recurso
         self._pending: Set[str] = set()
@@ -394,28 +450,72 @@ class RemediationService:
                     if "limits" not in res:
                         res["limits"] = {}
 
+                    s = self._remediation_settings
                     dm = metrics or DatadogProfilingMetrics()
-                    res["requests"]["cpu"] = dm.suggest_cpu_request()
-                    res["requests"]["memory"] = dm.suggest_memory_request()
-                    res["limits"]["cpu"] = dm.suggest_cpu_limit()
-                    res["limits"]["memory"] = dm.suggest_memory_limit()
+
+                    # Valores sugeridos — usam defaults do settings quando Datadog
+                    # não retornou dados efetivos para a aplicação
+                    suggested_cpu_req = dm.suggest_cpu_request(default=s.default_cpu_request)
+                    suggested_cpu_lim = dm.suggest_cpu_limit(default=s.default_cpu_limit)
+                    suggested_mem_req = dm.suggest_memory_request(default=s.default_memory_request)
+                    suggested_mem_lim = dm.suggest_memory_limit(default=s.default_memory_limit)
+
+                    # Garantia: nunca reduzir valores já configurados no manifesto
+                    res["requests"]["cpu"] = _keep_max(
+                        res["requests"].get("cpu", "0m"), suggested_cpu_req, _parse_cpu_millicores
+                    )
+                    res["requests"]["memory"] = _keep_max(
+                        res["requests"].get("memory", "0Mi"), suggested_mem_req, _parse_memory_mib
+                    )
+                    res["limits"]["cpu"] = _keep_max(
+                        res["limits"].get("cpu", "0m"), suggested_cpu_lim, _parse_cpu_millicores
+                    )
+                    res["limits"]["memory"] = _keep_max(
+                        res["limits"].get("memory", "0Mi"), suggested_mem_lim, _parse_memory_mib
+                    )
 
                     categories.append("resources")
 
             # ----- Modifica / adiciona HPA -----
             if hpa_issues:
+                s = self._remediation_settings
                 if hpa_doc is not None:
                     spec = hpa_doc.setdefault("spec", {})
-                    spec.setdefault("minReplicas", 2)
-                    spec.setdefault("maxReplicas", 10)
-                    spec["metrics"] = self._build_hpa_metrics_yaml()
+
+                    # Garantia: nunca reduzir minReplicas nem maxReplicas já configurados
+                    spec["minReplicas"] = max(spec.get("minReplicas", 0), s.hpa_min_replicas)
+                    spec["maxReplicas"] = max(spec.get("maxReplicas", 0), s.hpa_max_replicas)
+
+                    # Utilization: target menor = scaling mais agressivo = melhor.
+                    # Se o valor atual já é menor que o default, é intencional — preservar.
+                    # Se é maior (menos agressivo) ou inexistente, usar o default.
+                    current_metrics = spec.get("metrics", [])
+                    current_cpu_util = _extract_hpa_utilization(current_metrics, "cpu")
+                    current_mem_util = _extract_hpa_utilization(current_metrics, "memory")
+                    cpu_util = (
+                        min(current_cpu_util, s.hpa_cpu_utilization)
+                        if current_cpu_util
+                        else s.hpa_cpu_utilization
+                    )
+                    mem_util = (
+                        min(current_mem_util, s.hpa_memory_utilization)
+                        if current_mem_util
+                        else s.hpa_memory_utilization
+                    )
+                    spec["metrics"] = self._build_hpa_metrics_yaml(cpu_util, mem_util)
                     categories.append("hpa-update")
                 else:
-                    # Serializa documentos existentes, depois appenda HPA
+                    # Serializa documentos existentes, depois appenda HPA com defaults do settings
                     import yaml as stdlib_yaml
 
                     hpa_manifest = self._build_hpa_manifest_dict(
-                        resource_name, namespace, resource_kind
+                        resource_name,
+                        namespace,
+                        resource_kind,
+                        min_replicas=s.hpa_min_replicas,
+                        max_replicas=s.hpa_max_replicas,
+                        cpu_utilization=s.hpa_cpu_utilization,
+                        memory_utilization=s.hpa_memory_utilization,
                     )
                     hpa_yaml_str = (
                         "\n---\n"
@@ -441,26 +541,37 @@ class RemediationService:
             self.logger.exception("Erro ao modificar deploy.yaml com ruamel.yaml")
             return "", []
 
-    def _build_hpa_metrics_yaml(self) -> List[Dict[str, Any]]:
+    def _build_hpa_metrics_yaml(
+        self,
+        cpu_utilization: int = 70,
+        memory_utilization: int = 80,
+    ) -> List[Dict[str, Any]]:
         return [
             {
                 "type": "Resource",
                 "resource": {
                     "name": "cpu",
-                    "target": {"type": "Utilization", "averageUtilization": 70},
+                    "target": {"type": "Utilization", "averageUtilization": cpu_utilization},
                 },
             },
             {
                 "type": "Resource",
                 "resource": {
                     "name": "memory",
-                    "target": {"type": "Utilization", "averageUtilization": 80},
+                    "target": {"type": "Utilization", "averageUtilization": memory_utilization},
                 },
             },
         ]
 
     def _build_hpa_manifest_dict(
-        self, resource_name: str, namespace: str, resource_kind: str
+        self,
+        resource_name: str,
+        namespace: str,
+        resource_kind: str,
+        min_replicas: int = 2,
+        max_replicas: int = 10,
+        cpu_utilization: int = 70,
+        memory_utilization: int = 80,
     ) -> Dict[str, Any]:
         return {
             "apiVersion": "autoscaling/v2",
@@ -479,9 +590,9 @@ class RemediationService:
                     "kind": resource_kind,
                     "name": resource_name,
                 },
-                "minReplicas": 2,
-                "maxReplicas": 10,
-                "metrics": self._build_hpa_metrics_yaml(),
+                "minReplicas": min_replicas,
+                "maxReplicas": max_replicas,
+                "metrics": self._build_hpa_metrics_yaml(cpu_utilization, memory_utilization),
             },
         }
 

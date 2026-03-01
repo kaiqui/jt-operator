@@ -28,6 +28,8 @@ rules:
       - sloconfigs/status
       - appscorecards
       - appscorecards/status
+      - appremediations
+      - appremediations/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # Leader election

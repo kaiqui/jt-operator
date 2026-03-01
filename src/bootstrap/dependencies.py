@@ -6,6 +6,7 @@ from functools import lru_cache
 from src.settings import settings
 from src.infrastructure.kubernetes.k8s_status_writer import KubernetesStatusWriter
 from src.infrastructure.kubernetes.appscorecard_writer import AppScorecardWriter
+from src.infrastructure.kubernetes.remediation_writer import RemediationWriter
 from src.infrastructure.datadog.repository import DatadogRepository
 from src.infrastructure.slack.repository import SlackRepository
 from src.application.services.slo_service import SLOService
@@ -446,6 +447,19 @@ def get_github_repository():
 
 
 @lru_cache()
+def get_remediation_writer() -> Optional[RemediationWriter]:
+    """
+    Returns a singleton RemediationWriter.
+    Only active when auto-remediation is enabled (same guard as RemediationService).
+    """
+    if not settings.enable_auto_remediation:
+        return None
+    writer = RemediationWriter()
+    logger.info("RemediationWriter inicializado")
+    return writer
+
+
+@lru_cache()
 def get_remediation_service():
     """
     Retorna instância do RemediationService se a auto-remediação estiver habilitada.
@@ -476,6 +490,7 @@ def get_remediation_service():
         github_port=github_repo,
         slack_service=slack_service,
         datadog_repository=datadog_repo,
+        remediation_settings=settings.remediation,
     )
 
     logger.info("RemediationService inicializado")
