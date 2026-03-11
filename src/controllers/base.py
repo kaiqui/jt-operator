@@ -20,7 +20,7 @@ class BaseController:
             extra={"slack_enabled": self.slack_service is not None},
         )
 
-    def _check_enabled(self):
+    def _check_enabled(self) -> None:
         from src.settings import settings
 
         if self.name == "slo" and not settings.enable_slo_controller:
@@ -60,7 +60,7 @@ class BaseController:
                 extra={**logger_context, "status": status},
             )
 
-        except Exception:
+        except Exception as exc:
             self.logger.exception(
                 "Erro ao atualizar status",
                 extra={**logger_context},
@@ -68,7 +68,7 @@ class BaseController:
             raise kopf.TemporaryError(
                 f"Erro ao atualizar status",
                 delay=60,
-            )
+            ) from exc
 
     async def _send_slack_notification_safe(
         self,
@@ -78,7 +78,7 @@ class BaseController:
         channel: NotificationChannel = NotificationChannel.OPERATIONAL,
         namespace: Optional[str] = None,
         pod_name: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         if not self.slack_service:
             self.logger.debug(f"Slack desabilitado, ignorando: {title}")
@@ -119,11 +119,11 @@ class BaseController:
     async def _send_kopf_event_to_slack(
         self,
         event_type: str,
-        body: dict,
+        body: Dict[str, Any],
         reason: str,
         message: str,
         severity: Optional[NotificationSeverity] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         if not self.slack_service:
             return False
@@ -298,30 +298,42 @@ class BaseController:
     def _build_compliance_summary_fields(
         self, report: ComplianceReport
     ) -> List[Dict[str, str]]:
-        fields = [
-            {"title": "Status", "value": report.compliance_status.value, "short": True},
-            {"title": "Total Checks", "value": str(len(report.checks)), "short": True},
+        fields: List[Dict[str, str]] = [
+            {
+                "title": "Status",
+                "value": report.compliance_status.value,
+                "short": "true",
+            },
+            {
+                "title": "Total Checks",
+                "value": str(len(report.checks)),
+                "short": "true",
+            },
         ]
 
         passed_checks = sum(1 for check in report.checks if check.get("ok", False))
         failed_checks = len(report.checks) - passed_checks
 
-        fields.append({"title": "Passed", "value": str(passed_checks), "short": True})
-        fields.append({"title": "Failed", "value": str(failed_checks), "short": True})
+        fields.append({"title": "Passed", "value": str(passed_checks), "short": "true"})
+        fields.append({"title": "Failed", "value": str(failed_checks), "short": "true"})
 
         if report.issues:
             fields.append(
-                {"title": "Issues", "value": str(len(report.issues)), "short": True}
+                {"title": "Issues", "value": str(len(report.issues)), "short": "true"}
             )
 
         if report.warnings:
             fields.append(
-                {"title": "Warnings", "value": str(len(report.warnings)), "short": True}
+                {
+                    "title": "Warnings",
+                    "value": str(len(report.warnings)),
+                    "short": "true",
+                }
             )
 
         return fields
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         pass
 
     def _get_excluded_namespaces(self) -> List[str]:

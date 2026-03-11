@@ -16,7 +16,7 @@ class SlackNotifierPort(ABC):
         reason: str,
         message: str,
         severity: Optional[NotificationSeverity] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         pass
 

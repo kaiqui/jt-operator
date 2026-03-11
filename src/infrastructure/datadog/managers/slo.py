@@ -1,18 +1,18 @@
+import builtins
 from typing import Dict, List, Optional, Any
 
 from datadog_api_client.v1.api.service_level_objectives_api import (
     ServiceLevelObjectivesApi,
 )
-from datadog_api_client.v1.model.service_level_objective_request import (
-    ServiceLevelObjectiveRequest,
-)
 
 from src.infrastructure.datadog.client import DatadogClientBase
 from src.utils.json_logger import get_logger
 
+builtins_type = builtins.type
+
 
 class SLOManager(DatadogClientBase):
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
         # IMPORTANTE: Importar aqui para garantir que está correto
@@ -29,24 +29,19 @@ class SLOManager(DatadogClientBase):
             self.logger.error("ServiceLevelObjectivesApi não tem método update_slo!")
             raise AttributeError("ServiceLevelObjectivesApi não tem método update_slo")
 
-        if not callable(self.slo_api.update_slo):
-            self.logger.error("slo_api.update_slo não é callable!")
-            raise TypeError("slo_api.update_slo não é callable")
-
         self.logger = get_logger(self.__class__.__name__)
         self.logger.info(
             "SLOManager inicializado",
             extra={
-                "slo_api_type": type(self.slo_api).__name__,
+                "slo_api_type": builtins_type(self.slo_api).__name__,
                 "has_update_slo": hasattr(self.slo_api, "update_slo"),
-                "update_slo_callable": callable(self.slo_api.update_slo),
             },
         )
 
-    def create_service_level_objective(
+    def create_service_level_objective(  # noqa: A002
         self,
         name: str,
-        type: str = "metric",
+        type: str = "metric",  # noqa: A002
         thresholds: Optional[List[Dict[str, Any]]] = None,
         timeframe: str = "30d",
         target_threshold: float = 95.0,
@@ -55,6 +50,7 @@ class SLOManager(DatadogClientBase):
         description: str = "",
         query: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        slo_type = type  # use alias to avoid shadowing builtin
         self.logger.info(
             "Criando SLO - Parâmetros recebidos",
             extra={
@@ -114,7 +110,9 @@ class SLOManager(DatadogClientBase):
                         extra={
                             "threshold_index": i,
                             "warning_value": threshold["warning"],
-                            "warning_type": type(threshold["warning"]).__name__,
+                            "warning_type": builtins_type(
+                                threshold["warning"]
+                            ).__name__,
                         },
                     )
                     try:
@@ -126,15 +124,15 @@ class SLOManager(DatadogClientBase):
                         )
                         del threshold["warning"]  # Remove se não puder converter
 
-            slo_data = {
+            slo_data: Dict[str, Any] = {
                 "name": name,
-                "type": type,
+                "type": slo_type,
                 "thresholds": thresholds,
                 "tags": tags or [],
                 "description": description,
             }
 
-            if type == "metric" and query:
+            if slo_type == "metric" and query:
                 slo_data["query"] = query
 
             self.logger.info(
@@ -150,6 +148,10 @@ class SLOManager(DatadogClientBase):
                 extra={"payload": json.dumps(slo_data, indent=2, default=str)},
             )
 
+            from datadog_api_client.v1.model.service_level_objective_request import (
+                ServiceLevelObjectiveRequest,
+            )
+
             response = self.execute_with_retry(
                 self.slo_api.create_slo, body=ServiceLevelObjectiveRequest(**slo_data)
             )
@@ -158,7 +160,7 @@ class SLOManager(DatadogClientBase):
             self.logger.info(
                 "Resposta da API do Datadog",
                 extra={
-                    "response_type": type(response).__name__,
+                    "response_type": builtins_type(response).__name__,
                     "response_attrs": dir(response)[:20]
                     if hasattr(response, "__dir__")
                     else [],
@@ -171,7 +173,7 @@ class SLOManager(DatadogClientBase):
 
             self.logger.info(
                 "SLO criado com sucesso",
-                extra={"slo_name": name, "slo_id": slo_id, "slo_type": type},
+                extra={"slo_name": name, "slo_id": slo_id, "slo_type": slo_type},
             )
 
             return {
@@ -299,22 +301,20 @@ class SLOManager(DatadogClientBase):
             )
             raise
 
-    def update_service_level_objective(
+    def update_service_level_objective(  # noqa: A002
         self,
         slo_id: str,
         name: str,
-        type: str,
+        type: str,  # noqa: A002
         thresholds: List[Dict[str, Any]],
         tags: List[str],
         description: str = "",
         query: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Atualiza um SLO existente no Datadog.
-        """
+        slo_type = type  # use alias to avoid shadowing builtin
         self.logger.info(
             "Atualizando SLO no Datadog",
-            extra={"slo_id": slo_id, "slo_name": name, "slo_type": type},
+            extra={"slo_id": slo_id, "slo_name": name, "slo_type": slo_type},
         )
 
         try:
@@ -333,7 +333,9 @@ class SLOManager(DatadogClientBase):
                         extra={
                             "threshold_index": i,
                             "warning_value": threshold["warning"],
-                            "warning_type": type(threshold["warning"]).__name__,
+                            "warning_type": builtins_type(
+                                threshold["warning"]
+                            ).__name__,
                         },
                     )
                     try:
@@ -352,35 +354,21 @@ class SLOManager(DatadogClientBase):
                 extra={"thresholds": thresholds, "slo_id": slo_id},
             )
 
-            # IMPORTANTE: Verificar se slo_api.update_slo é callable - LINHA 4
-            self.logger.info("DEBUG: Antes de verificar callable")
-            if not callable(self.slo_api.update_slo):
-                self.logger.error(
-                    "self.slo_api.update_slo não é um método!",
-                    extra={
-                        "type": type(self.slo_api.update_slo).__name__,
-                        "value": str(self.slo_api.update_slo)[:100],
-                    },
-                )
-                raise TypeError(
-                    f"self.slo_api.update_slo não é um método, é {type(self.slo_api.update_slo)}"
-                )
-
             # Usar ServiceLevelObjective para atualização - LINHA 5
             self.logger.info("DEBUG: Antes de importar ServiceLevelObjective")
             from datadog_api_client.v1.model.service_level_objective import (
                 ServiceLevelObjective,
             )
 
-            slo_data = {
+            slo_data: Dict[str, Any] = {
                 "name": name,
-                "type": type,
+                "type": slo_type,
                 "thresholds": thresholds,
                 "tags": tags,
                 "description": description,
             }
 
-            if type == "metric" and query:
+            if slo_type == "metric" and query:
                 slo_data["query"] = query
 
             # Criar objeto ServiceLevelObjective - LINHA 6
@@ -431,14 +419,14 @@ class SLOManager(DatadogClientBase):
                 "Erro DETALHADO ao atualizar SLO no Datadog",
                 extra={
                     "slo_id": slo_id,
-                    "error_type": type(error).__name__,
+                    "error_type": builtins_type(error).__name__,
                     "error_args": getattr(error, "args", "N/A"),
                     "traceback": self._get_full_traceback(error),
                 },
             )
             raise
 
-    def _get_full_traceback(self, error=None):
+    def _get_full_traceback(self, error: Optional[Exception] = None) -> str:
         import traceback
 
         if error:
@@ -454,7 +442,8 @@ class SLOManager(DatadogClientBase):
         try:
             response = self.execute_with_retry(self.slo_api.get_slo, slo_id=slo_id)
 
-            return response.to_dict()
+            result: Dict[str, Any] = response.to_dict()
+            return result
 
         except Exception:
             self.logger.exception(
@@ -465,7 +454,7 @@ class SLOManager(DatadogClientBase):
             )
             raise
 
-    def list_slos(self, **kwargs) -> List[Dict[str, Any]]:
+    def list_slos(self, **kwargs: Any) -> List[Dict[str, Any]]:
         self.logger.info("Listando SLOs")
 
         try:
@@ -486,7 +475,7 @@ class SLOManager(DatadogClientBase):
         query: Optional[str] = None,
         page_size: int = 20,
         page_number: int = 0,
-        **kwargs,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         self.logger.info(
             "Buscando SLOs",

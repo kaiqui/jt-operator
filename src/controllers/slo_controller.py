@@ -1,5 +1,5 @@
 import kopf
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pydantic import ValidationError
 
@@ -11,13 +11,13 @@ from src.application.services.slo_metrics_service import SLOAction, SLOErrorKind
 
 
 class SLOController(BaseController):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("slo")
         self.slo_service = get_slo_service()
         self.metrics = get_slo_metrics_service()
 
     async def on_slo_config_change(
-        self, body: Dict[str, Any], **kwargs
+        self, body: Dict[str, Any], **kwargs: Any
     ) -> Dict[str, Any]:
         context = self._get_resource_context(body)
         resource_name = context["resource_name"]
@@ -136,6 +136,8 @@ class SLOController(BaseController):
                     },
                 )
 
+                if not self.slo_service:
+                    raise RuntimeError("SLOService não disponível")
                 reconciliation_result = (
                     self.slo_service.reconcile_slo(
                         namespace=resource_namespace,
@@ -413,21 +415,18 @@ class SLOController(BaseController):
 
         if has_datadog_error:
             return f"{event_emoji} {result_emoji} SLOConfig {action_text} com ERRO: {resource_name}"
-        elif has_validation_errors:
+        if has_validation_errors:
             return f"{event_emoji} {result_emoji} SLOConfig {action_text} com VALIDAÇÃO: {resource_name}"
-        elif success:
+        if success:
             return f"{event_emoji} {result_emoji} SLOConfig {action_text} com SUCESSO: {resource_name}"
-        else:
-            return (
-                f"{event_emoji} {result_emoji} SLOConfig {action_text}: {resource_name}"
-            )
+        return f"{event_emoji} {result_emoji} SLOConfig {action_text}: {resource_name}"
 
     def _build_complete_slo_message(
         self,
         event_type: str,
         resource_name: str,
         resource_namespace: str,
-        spec: SLOConfigSpec,
+        spec: Optional[SLOConfigSpec],
         result: Dict[str, Any],
     ) -> str:
         message = ""
@@ -591,27 +590,36 @@ class SLOController(BaseController):
         return message
 
     def _build_slo_additional_fields(
-        self, spec: SLOConfigSpec, result: Dict[str, Any], resource_namespace: str
+        self,
+        spec: Optional[SLOConfigSpec],
+        result: Dict[str, Any],
+        resource_namespace: str,
     ) -> List[Dict[str, str]]:
-        fields = [
-            {"title": "Namespace", "value": resource_namespace, "short": True},
+        fields: List[Dict[str, str]] = [
+            {"title": "Namespace", "value": resource_namespace, "short": "true"},
             {
                 "title": "Status",
-                "value": "✅ Sucesso" if result["success"] else "❌ Falha",
-                "short": True,
+                "value": "Sucesso" if result["success"] else "Falha",
+                "short": "true",
             },
-            {"title": "Ação", "value": result.get("action", "unknown"), "short": True},
+            {
+                "title": "Ação",
+                "value": result.get("action", "unknown"),
+                "short": "true",
+            },
         ]
 
         if spec:
-            fields.append({"title": "Serviço", "value": spec.service, "short": True})
-            fields.append({"title": "Tipo", "value": spec.type.value, "short": True})
+            fields.append({"title": "Serviço", "value": spec.service, "short": "true"})
+            fields.append({"title": "Tipo", "value": spec.type.value, "short": "true"})
             fields.append(
-                {"title": "Target", "value": f"{spec.target}%", "short": True}
+                {"title": "Target", "value": f"{spec.target}%", "short": "true"}
             )
 
         if result.get("slo_id"):
-            fields.append({"title": "SLO ID", "value": result["slo_id"], "short": True})
+            fields.append(
+                {"title": "SLO ID", "value": str(result["slo_id"]), "short": "true"}
+            )
 
         # Adiciona contagem de erros se houver
         validation_errors = result.get("validation_errors", [])
@@ -625,37 +633,29 @@ class SLOController(BaseController):
                     {
                         "title": "Erros Validação",
                         "value": str(len(errors)),
-                        "short": True,
+                        "short": "true",
                     }
                 )
             if warnings:
                 fields.append(
-                    {"title": "Warnings", "value": str(len(warnings)), "short": True}
+                    {"title": "Warnings", "value": str(len(warnings)), "short": "true"}
                 )
 
         if result.get("datadog_error"):
-            fields.append({"title": "Erro Datadog", "value": "Sim", "short": True})
+            fields.append({"title": "Erro Datadog", "value": "Sim", "short": "true"})
 
         # Adiciona tags se disponíveis
         if spec and spec.tags:
             tags_text = ", ".join(spec.tags[:3])  # Limita a 3 tags
             if len(spec.tags) > 3:
                 tags_text += f" (+{len(spec.tags)-3})"
-            fields.append({"title": "Tags", "value": tags_text, "short": False})
+            fields.append({"title": "Tags", "value": tags_text, "short": "false"})
 
         return fields
 
     def _update_status_with_error(
         self, body: Dict[str, Any], error_msg: str, context: Dict[str, Any]
-    ):
-        """
-        Atualiza status com erro.
-
-        Args:
-            body: Corpo do recurso
-            error_msg: Mensagem de erro
-            context: Contexto para logging
-        """
+    ) -> None:
         fallback_status = {
             "slo_id": None,
             "state": "error",
@@ -678,10 +678,6 @@ class SLOController(BaseController):
         namespace: str,
         error_kind: SLOErrorKind,
     ) -> None:
-        """
-        Emite métrica de reconciliação de forma centralizada.
-        Nunca propaga exceções — métricas são best-effort.
-        """
         if not self.metrics:
             return
 
@@ -705,56 +701,34 @@ class SLOController(BaseController):
         )
 
 
-# Instância global do controller
-slo_controller = SLOController()
+# Instância global do controller — inicializada de forma lazy
+_slo_controller: Optional[SLOController] = None
 
 
-@kopf.on.create("titlis.io", "v1", "sloconfigs")
-async def on_slo_create(body, **kwargs):
-    """
-    Handler para criação de SLOConfig.
+def _get_slo_controller() -> SLOController:
+    global _slo_controller
+    if _slo_controller is None:
+        _slo_controller = SLOController()
+    return _slo_controller
 
-    Args:
-        body: Corpo do recurso
-        **kwargs: Argumentos adicionais
 
-    Returns:
-        Resultado da operação
-    """
-    return await slo_controller.on_slo_config_change(
+@kopf.on.create("titlis.io", "v1", "sloconfigs")  # type: ignore[arg-type]
+async def on_slo_create(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    return await _get_slo_controller().on_slo_config_change(
         body, event_type="create", **kwargs
     )
 
 
-@kopf.on.update("titlis.io", "v1", "sloconfigs")
-async def on_slo_update(body, **kwargs):
-    """
-    Handler para atualização de SLOConfig.
-
-    Args:
-        body: Corpo do recurso
-        **kwargs: Argumentos adicionais
-
-    Returns:
-        Resultado da operação
-    """
-    return await slo_controller.on_slo_config_change(
+@kopf.on.update("titlis.io", "v1", "sloconfigs")  # type: ignore[arg-type]
+async def on_slo_update(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    return await _get_slo_controller().on_slo_config_change(
         body, event_type="update", **kwargs
     )
 
 
-@kopf.on.delete("titlis.io", "v1", "sloconfigs")
-async def on_slo_delete(body, **kwargs):
-    """
-    Handler para deleção de SLOConfig.
-
-    Args:
-        body: Corpo do recurso
-        **kwargs: Argumentos adicionais
-
-    Returns:
-        Resultado da operação
-    """
+@kopf.on.delete("titlis.io", "v1", "sloconfigs")  # type: ignore[arg-type]
+async def on_slo_delete(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    slo_controller = _get_slo_controller()
     context = slo_controller._get_resource_context(body)
     resource_name = context["resource_name"]
     resource_namespace = context["resource_namespace"]

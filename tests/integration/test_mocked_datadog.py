@@ -6,11 +6,8 @@ from src.infrastructure.datadog.repository import DatadogRepository
 
 
 class TestMockedDatadogIntegration:
-    """Integration tests with mocked Datadog API."""
-
     @pytest.fixture
     def mock_datadog_client(self):
-        """Mock Datadog API client."""
         with patch(
             "src.infrastructure.datadog.managers.slo.ServiceLevelObjectivesApi"
         ) as mock_api:
@@ -48,7 +45,6 @@ class TestMockedDatadogIntegration:
             yield mock_api_instance
 
     def test_slo_lifecycle(self, mock_datadog_client):
-        """Test complete SLO lifecycle with mocked API."""
         # Create SLOManager
         manager = SLOManager(api_key="test-key", app_key="test-app-key")
 
@@ -71,7 +67,6 @@ class TestMockedDatadogIntegration:
         mock_datadog_client.search_slo.assert_called_once()
 
     def test_repository_integration(self):
-        """Test DatadogRepository integration with mocked manager."""
         with patch(
             "src.infrastructure.datadog.repository.DatadogManagerFactory"
         ) as mock_factory:
@@ -106,6 +101,4 @@ class TestMockedDatadogIntegration:
 
             assert len(slos) == 1
             assert slos[0].name == "test-slo"
-            mock_manager.search_slos_by_service.assert_called_once_with(
-                "test-service", page_size=20, page_number=0
-            )
+            mock_manager.search_slos_by_service.assert_called_once_with("test-service")

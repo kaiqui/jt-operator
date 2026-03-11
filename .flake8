@@ -8,7 +8,9 @@ extend-ignore =
     # f-string without placeholders — common pattern in logger.exception calls
     F541,
     # module-level import not at top — intentional in bootstrap/dependencies.py
-    E402
+    E402,
+    # docstrings — projeto não usa docstrings
+    D100,D101,D102,D103,D104,D105,D106,D107
 per-file-ignores =
     # test files: unused imports and variables are common in test suites
     tests/*:F401,F841

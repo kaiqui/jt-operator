@@ -1,8 +1,5 @@
-"""
-Slack message builder for official SDK.
-"""
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from src.domain.slack_models import SlackMessageTemplate, NotificationSeverity
 
 
@@ -13,7 +10,7 @@ class SlackMessageBuilder:
         message: str,
         severity: NotificationSeverity,
         template: SlackMessageTemplate,
-        metadata: Dict[str, Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         metadata = metadata or {}
         blocks = []
@@ -55,7 +52,7 @@ class SlackMessageBuilder:
         )
 
         # Context block with metadata
-        context_elements = []
+        context_elements: List[Dict[str, Any]] = []
 
         if template.include_timestamp and metadata.get("timestamp"):
             context_elements.append(
@@ -78,7 +75,11 @@ class SlackMessageBuilder:
             )
 
         if context_elements:
-            blocks.append({"type": "context", "elements": context_elements})
+            context_block: Dict[str, Any] = {
+                "type": "context",
+                "elements": context_elements,
+            }
+            blocks.append(context_block)
 
         return blocks
 
@@ -87,11 +88,11 @@ class SlackMessageBuilder:
         message: str,
         severity: NotificationSeverity,
         template: SlackMessageTemplate,
-        additional_fields: List[Dict[str, str]] = None,
+        additional_fields: Optional[List[Dict[str, str]]] = None,
     ) -> List[Dict[str, Any]]:
         color = template.color_map.get(severity, "#cccccc")
 
-        attachment = {
+        attachment: Dict[str, Any] = {
             "color": color,
             "text": message[: template.max_message_length],
             "ts": datetime.utcnow().timestamp() if template.include_timestamp else None,

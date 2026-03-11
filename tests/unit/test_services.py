@@ -10,11 +10,8 @@ sys.modules["kopf"] = MockKopf()
 
 
 class TestSLOService:
-    """Test SLO service logic."""
-
     @pytest.fixture
     def mock_datadog_port(self):
-        """Mock DatadogPort."""
         mock = Mock()
 
         # Mock get_service_slos
@@ -30,12 +27,10 @@ class TestSLOService:
 
     @pytest.fixture
     def slo_service(self, mock_datadog_port):
-        """Create SLOService with mocked port."""
         return SLOService(mock_datadog_port)
 
     @pytest.fixture
     def sample_slo_spec(self):
-        """Sample SLO configuration spec."""
         return SLOConfigSpec(
             service="test-service",
             type=SLOType.METRIC,
@@ -47,7 +42,6 @@ class TestSLOService:
         )
 
     def test_build_slo_from_spec(self, slo_service, sample_slo_spec):
-        """Test building SLO object from spec."""
         slo = slo_service._build_slo_from_spec(
             namespace="default", service="test-service", spec=sample_slo_spec
         )
@@ -64,7 +58,6 @@ class TestSLOService:
         assert slo.thresholds[0]["target"] == 99.9
 
     def test_build_slo_without_warning(self, slo_service):
-        """Test building SLO without warning threshold."""
         spec = SLOConfigSpec(
             service="test-service",
             type=SLOType.METRIC,
@@ -81,7 +74,6 @@ class TestSLOService:
         assert "warning" not in slo.thresholds[0]
 
     def test_build_slo_with_custom_query(self, slo_service):
-        """Test building SLO with custom numerator/denominator."""
         spec = SLOConfigSpec(
             service="test-service",
             type=SLOType.METRIC,
@@ -99,7 +91,6 @@ class TestSLOService:
         assert slo.query["denominator"] == "sum:test.denominator"
 
     def test_reconcile_slo_new(self, slo_service, sample_slo_spec, mock_datadog_port):
-        """Test reconciling a new SLO."""
         result = slo_service.reconcile_slo(
             namespace="default", service="test-service", spec=sample_slo_spec
         )
@@ -112,7 +103,6 @@ class TestSLOService:
     def test_reconcile_slo_existing(
         self, slo_service, sample_slo_spec, mock_datadog_port
     ):
-        """Test reconciling an existing SLO that needs update."""
         # Mock existing SLO
         from src.domain.models import SLO, SLOType, SLOTimeframe
 
@@ -139,7 +129,6 @@ class TestSLOService:
         mock_datadog_port.update_slo_apps.assert_called_once()
 
     def test_compare_slo_parameters(self, slo_service):
-        """Test SLO parameter comparison."""
         from src.domain.models import SLO, SLOType, SLOTimeframe
 
         existing_slo = Mock(spec=SLO)
@@ -165,11 +154,8 @@ class TestSLOService:
 
 
 class TestScorecardService:
-    """Test Scorecard service with mocked Kubernetes."""
-
     @pytest.fixture
     def mock_kubernetes_apis(self):
-        """Mock Kubernetes APIs."""
         with patch(
             "src.application.services.scorecard_service.get_k8s_apis"
         ) as mock_get_apis:
@@ -203,7 +189,6 @@ class TestScorecardService:
 
     @pytest.fixture
     def sample_deployment_dict(self):
-        """Sample deployment dictionary."""
         return {
             "metadata": {
                 "name": "test-deployment",
@@ -244,7 +229,6 @@ class TestScorecardService:
 
     @pytest.fixture
     def scorecard_service(self, mock_kubernetes_apis):
-        """Create ScorecardService with mocked dependencies."""
         # Mock KubeStateStore
         with patch(
             "src.application.services.scorecard_service.KubeStateStore"
@@ -266,7 +250,6 @@ class TestScorecardService:
             return service
 
     def test_load_default_rules(self, scorecard_service):
-        """Test loading default validation rules."""
         assert len(scorecard_service.config.rules) > 0
 
         # Check that we have rules for different pillars
@@ -283,8 +266,6 @@ class TestScorecardService:
     def test_extract_value_from_resource(
         self, scorecard_service, sample_deployment_dict
     ):
-        """Test extracting values from resource dictionary."""
-
         # Test extracting liveness probe
         liveness = scorecard_service._extract_value_from_resource(
             "RES-001", sample_deployment_dict, "default", "test-deployment"
@@ -316,7 +297,6 @@ class TestScorecardService:
         assert non_root is True
 
     def test_calculate_pillar_scores(self, scorecard_service):
-        """Test calculating pillar scores from validation results."""
         from src.domain.models import (
             ValidationResult,
             ValidationPillar,
@@ -371,7 +351,6 @@ class TestScorecardService:
         assert security_score.score == 100.0  # All passed
 
     def test_calculate_overall_score(self, scorecard_service):
-        """Test calculating overall score from pillar scores."""
         from src.domain.models import (
             PillarScore,
             ValidationPillar,
@@ -409,7 +388,6 @@ class TestScorecardService:
         assert abs(overall_score - 84.55) < 0.1
 
     def test_should_notify_logic(self, scorecard_service):
-        """Test notification decision logic."""
         from src.domain.models import ResourceScorecard
 
         # Create test scorecards
@@ -444,7 +422,6 @@ class TestScorecardService:
         assert scorecard_service.should_notify(good_scorecard) is False
 
     def test_get_notification_severity(self, scorecard_service):
-        """Test determining notification severity."""
         from src.domain.models import ResourceScorecard
 
         # Test critical

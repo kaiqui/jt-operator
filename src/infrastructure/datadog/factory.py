@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 from src.infrastructure.datadog.managers.slo import SLOManager
 
 
@@ -10,7 +10,7 @@ class DatadogManagerFactory:
         self.app_key = app_key
         self.site = site
 
-    def create_manager(self, manager_name: str):
+    def create_manager(self, manager_name: str) -> Any:
         manager_name = manager_name.lower()
         common_kwargs = {
             "api_key": self.api_key,

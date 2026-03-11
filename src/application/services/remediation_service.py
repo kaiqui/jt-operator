@@ -18,7 +18,6 @@ from src.domain.models import HPAProfile
 from src.domain.slack_models import (
     NotificationChannel,
     NotificationSeverity,
-    SlackNotification,
 )
 from src.utils.json_logger import get_logger
 
@@ -47,7 +46,7 @@ def _parse_memory_mib(value: str) -> int:
     return max(1, int(float(v) / 1_048_576))
 
 
-def _keep_max(current: str, suggested: str, parser) -> str:
+def _keep_max(current: str, suggested: str, parser: Any) -> str:
     try:
         return suggested if parser(suggested) >= parser(current) else current
     except (ValueError, TypeError):
@@ -63,7 +62,8 @@ def _extract_hpa_utilization(
             if resource.get("name") == resource_name:
                 target = resource.get("target", {})
                 if target.get("type") == "Utilization":
-                    return target.get("averageUtilization")
+                    val = target.get("averageUtilization")
+                    return int(val) if val is not None else None
     return None
 
 
@@ -78,8 +78,6 @@ _CRITICALITY_ANNOTATION = "titlis.io/criticality"
 
 
 class ResourceRemediationAction:
-    """Ação de remediação de resources (CPU/memória) — Perfil Leve."""
-
     def __init__(self, settings: RemediationSettings) -> None:
         self._settings = settings
         self.logger = get_logger(self.__class__.__name__)
@@ -89,7 +87,6 @@ class ResourceRemediationAction:
         document: Any,
         metrics: Optional[DatadogProfilingMetrics],
     ) -> bool:
-        """Aplica sugestões de CPU/memória no documento Deployment. Retorna True se modificou."""
         containers = (
             document.get("spec", {})
             .get("template", {})
@@ -135,8 +132,6 @@ class ResourceRemediationAction:
 
 
 class HPARemediationAction:
-    """Ação de remediação de HPA — suporta perfil Leve e Rígido."""
-
     def __init__(self, settings: RemediationSettings) -> None:
         self._settings = settings
         self.logger = get_logger(self.__class__.__name__)
@@ -146,7 +141,6 @@ class HPARemediationAction:
         hpa_doc: Any,
         hpa_profile: HPAProfile,
     ) -> None:
-        """Atualiza um documento HPA existente com as configurações sugeridas."""
         s = self._settings
         spec = hpa_doc.setdefault("spec", {})
 
@@ -178,7 +172,6 @@ class HPARemediationAction:
         resource_kind: str,
         hpa_profile: HPAProfile,
     ) -> Dict[str, Any]:
-        """Constrói um novo manifesto HPA completo."""
         s = self._settings
         manifest: Dict[str, Any] = {
             "apiVersion": "autoscaling/v2",
@@ -325,7 +318,7 @@ class RemediationService:
         )
         if existing_pr:
             self.logger.info(
-                "PR de remediacao ja existe — remediacao ignorada",
+                "PR de remediacao ja existe aberta — remediacao ignorada",
                 extra={
                     "resource": f"{request.namespace}/{request.resource_name}",
                     "pr_number": existing_pr.number,
@@ -339,6 +332,31 @@ class RemediationService:
                     f"#{existing_pr.number} — {existing_pr.url}"
                 ),
                 pull_request=existing_pr,
+            )
+
+        merged_pr = await self._github.find_merged_remediation_pr(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            namespace=request.namespace,
+            resource_name=request.resource_name,
+            base_branch=request.base_branch,
+        )
+        if merged_pr:
+            self.logger.info(
+                "PR de remediacao ja foi mergeada — remediacao ignorada",
+                extra={
+                    "resource": f"{request.namespace}/{request.resource_name}",
+                    "pr_number": merged_pr.number,
+                    "pr_url": merged_pr.url,
+                },
+            )
+            return RemediationResult(
+                success=False,
+                error=(
+                    f"PR de remediacao ja foi mergeada: "
+                    f"#{merged_pr.number} — {merged_pr.url}"
+                ),
+                pull_request=merged_pr,
             )
 
         self._pending.add(resource_key)
@@ -491,12 +509,6 @@ class RemediationService:
         resource_body: Dict[str, Any],
         resource_name: str,
     ) -> HPAProfile:
-        """
-        Determina o perfil de HPA para a remediação.
-        Prioridade 1: annotation titlis.io/criticality: high → RIGID.
-        Prioridade 2: Datadog request count > threshold → RIGID.
-        Default: LIGHT.
-        """
         annotations = resource_body.get("metadata", {}).get("annotations") or {}
         if annotations.get(_CRITICALITY_ANNOTATION) == "high":
             self.logger.info(
@@ -533,7 +545,10 @@ class RemediationService:
         if not self._datadog:
             return None
         try:
-            return self._datadog.get_container_metrics(deployment_name, namespace)
+            result: Optional[
+                DatadogProfilingMetrics
+            ] = self._datadog.get_container_metrics(deployment_name, namespace)
+            return result
         except Exception:
             self.logger.warning(
                 "Falha ao coletar metricas de profiling do Datadog",
@@ -737,32 +752,36 @@ class RemediationService:
                 f" MEM avg={metrics.memory_avg_mib}Mi"
             )
 
-        notification = SlackNotification(
-            title=f"Auto-Remediacao PR Criado — {cats_str}",
-            message=(
-                f"*Recurso:* `{request.namespace}/{request.resource_name}`"
-                f" ({request.resource_kind})\n"
-                f"*Categorias:* {cats_str}\n"
-                f"*Branch:* `{pr.branch}` -> `{pr.base_branch}`\n"
-                f"*Issues ({len(request.issues)}):*\n{issues_text}"
-                f"{metrics_line}\n"
-                f"*PR:* <{pr.url}|#{pr.number} — revisao obrigatoria>"
-            ),
-            severity=NotificationSeverity.WARNING,
-            channel=NotificationChannel.OPERATIONAL,
-            namespace=request.namespace,
-            additional_fields={
-                "pr_url": pr.url,
-                "pr_number": str(pr.number),
-                "branch": pr.branch,
-                "resource": f"{request.namespace}/{request.resource_name}",
-                "categories": cats_str,
-                "generated_by": "titlis-operator",
+        additional_fields: List[Dict[str, str]] = [
+            {"title": "PR URL", "value": pr.url, "short": "false"},
+            {"title": "PR Number", "value": str(pr.number), "short": "true"},
+            {"title": "Branch", "value": pr.branch, "short": "true"},
+            {
+                "title": "Resource",
+                "value": f"{request.namespace}/{request.resource_name}",
+                "short": "true",
             },
-        )
+            {"title": "Categories", "value": cats_str, "short": "true"},
+            {"title": "Generated By", "value": "titlis-operator", "short": "true"},
+        ]
 
         try:
-            await self._slack.send_notification(notification)
+            await self._slack.send_notification(
+                title=f"Auto-Remediacao PR Criado — {cats_str}",
+                message=(
+                    f"*Recurso:* `{request.namespace}/{request.resource_name}`"
+                    f" ({request.resource_kind})\n"
+                    f"*Categorias:* {cats_str}\n"
+                    f"*Branch:* `{pr.branch}` -> `{pr.base_branch}`\n"
+                    f"*Issues ({len(request.issues)}):*\n{issues_text}"
+                    f"{metrics_line}\n"
+                    f"*PR:* <{pr.url}|#{pr.number} — revisao obrigatoria>"
+                ),
+                severity=NotificationSeverity.WARNING,
+                channel=NotificationChannel.OPERATIONAL,
+                namespace=request.namespace,
+                additional_fields=additional_fields,
+            )
             self.logger.info(
                 "Notificacao Slack de remediacao enviada",
                 extra={"pr_number": pr.number},

@@ -1,12 +1,11 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import kubernetes
 from kubernetes import client as k8s_client
 from kubernetes.client.rest import ApiException
 
 from src.utils.json_logger import get_logger
-
 
 CASTAI_SERVICES = [
     "castai-agent",
@@ -97,7 +96,7 @@ class CastAIHealthChecker:
         base_result.is_healthy, base_result.reason = self._evaluate_pod(pod)
         return base_result
 
-    def _find_pods(self, service: str):
+    def _find_pods(self, service: str) -> Any:
         v1 = k8s_client.CoreV1Api()
 
         for selector in [f"app={service}", f"app.kubernetes.io/name={service}"]:
@@ -119,7 +118,7 @@ class CastAIHealthChecker:
         return []
 
     @staticmethod
-    def _evaluate_pod(pod) -> tuple[bool, str]:
+    def _evaluate_pod(pod: Any) -> tuple[bool, str]:
         phase = pod.status.phase if pod.status else None
 
         if phase != "Running":

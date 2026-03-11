@@ -1,13 +1,7 @@
-"""
-tests/test_castai_monitor.py
-
-Testes unitários para o CastAI Monitor Controller.
-"""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -15,7 +9,6 @@ import pytest
 
 
 def _make_pod(phase="Running", ready_status="True", ready_reason=None):
-    """Cria um mock de pod Kubernetes."""
     pod = MagicMock()
     pod.metadata.name = "castai-agent-abc12"
     pod.metadata.creation_timestamp = "2024-01-01T00:00:00Z"

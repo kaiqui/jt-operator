@@ -1,13 +1,8 @@
-"""
-Mock for kopf module to avoid metaclass conflicts.
-"""
 import sys
 
 
 # Create a simple mock kopf module
 class MockKopf:
-    """Mock kopf module."""
-
     class TemporaryError(Exception):
         def __init__(self, message, delay=60):
             self.message = message
@@ -15,8 +10,6 @@ class MockKopf:
             super().__init__(message)
 
     class _OnNamespace:
-        """Mock kopf.on namespace."""
-
         @staticmethod
         def startup():
             def decorator(func):

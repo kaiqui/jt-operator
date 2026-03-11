@@ -1,9 +1,3 @@
-"""
-Manager para consulta de métricas de recursos de containers no Datadog.
-
-Usado pelo RemediationService para obter CPU e memória médias de um Deployment
-e embasar os valores sugeridos de requests/limits.
-"""
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -20,22 +14,12 @@ _BYTES_TO_MIB = 1_048_576
 
 
 class DatadogMetricsManager(DatadogManagerBase):
-    """
-    Consulta métricas de recursos (CPU / memória) de Deployments via Datadog Metrics API v1.
-    """
-
     def get_container_metrics(
         self,
         deployment_name: str,
         namespace: str,
         lookback_hours: int = 1,
     ) -> Optional[DatadogProfilingMetrics]:
-        """
-        Retorna a média de CPU (millicores) e memória (MiB) do Deployment
-        no intervalo de tempo especificado.
-
-        Retorna None se não houver dados ou se a API estiver indisponível.
-        """
         from datadog_api_client.v1.api.metrics_api import MetricsApi
 
         now = datetime.now(timezone.utc)
@@ -118,12 +102,6 @@ class DatadogMetricsManager(DatadogManagerBase):
         service_name: str,
         days: int = 30,
     ) -> Optional[int]:
-        """
-        Retorna o total de requisições web do serviço nos últimos N dias.
-
-        Usa a métrica trace.web.request.hits filtrada por service:NAME.
-        Retorna None se não houver dados ou a API estiver indisponível.
-        """
         from datadog_api_client.v1.api.metrics_api import MetricsApi
 
         now = datetime.now(timezone.utc)

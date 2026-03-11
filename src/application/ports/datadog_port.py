@@ -21,6 +21,9 @@ class DatadogPort(ABC):
         pass
 
     @abstractmethod
+    def delete_slo(self, slo_id: str) -> bool:
+        pass
+
+    @abstractmethod
     def get_request_count(self, service_name: str, days: int = 30) -> Optional[int]:
-        """Retorna o total de requisições do serviço nos últimos N dias, ou None se indisponível."""
         pass

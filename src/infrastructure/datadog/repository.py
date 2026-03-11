@@ -343,16 +343,12 @@ class DatadogRepository(DatadogPort):
         namespace: str,
         lookback_hours: int = 1,
     ) -> Optional[DatadogProfilingMetrics]:
-        """
-        Retorna métricas de profiling (CPU / memória) de um Deployment.
-        Delega para DatadogMetricsManager.
-        Retorna None se não houver dados ou em caso de erro.
-        """
         try:
             manager = self.factory.create_manager("metrics")
-            return manager.get_container_metrics(
+            result: Optional[DatadogProfilingMetrics] = manager.get_container_metrics(
                 deployment_name, namespace, lookback_hours
             )
+            return result
         except Exception:
             self.logger.exception(
                 "Erro ao buscar métricas de container",
@@ -360,15 +356,23 @@ class DatadogRepository(DatadogPort):
             )
             return None
 
+    def delete_slo(self, slo_id: str) -> bool:
+        try:
+            manager = self.factory.create_manager("slo")
+            result = manager.delete_service_level_objective(slo_id)
+            return bool(result)
+        except Exception:
+            self.logger.exception(
+                "Erro ao deletar SLO",
+                extra={"slo_id": slo_id},
+            )
+            return False
+
     def get_request_count(self, service_name: str, days: int = 30) -> Optional[int]:
-        """
-        Retorna o total de requisições web do serviço nos últimos N dias.
-        Delega para DatadogMetricsManager.
-        Retorna None se não houver dados ou em caso de erro.
-        """
         try:
             manager = self.factory.create_manager("metrics")
-            return manager.get_request_count(service_name, days)
+            result: Optional[int] = manager.get_request_count(service_name, days)
+            return result
         except Exception:
             self.logger.exception(
                 "Erro ao buscar contagem de requisições",

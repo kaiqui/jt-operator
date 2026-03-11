@@ -13,15 +13,11 @@ class ComplianceStatus(str, Enum):
 
 
 class HPAProfile(str, Enum):
-    """Perfil de validação/remediação de HPA."""
-
     LIGHT = "light"
     RIGID = "rigid"
 
 
 class CriticalityLevel(str, Enum):
-    """Nível de criticidade de uma aplicação."""
-
     STANDARD = "standard"
     HIGH = "high"
 
@@ -83,7 +79,7 @@ class SLO:
     service_name: str
     slo_type: SLOType
     target_threshold: float
-    warning_threshold: float
+    warning_threshold: Optional[float]
     timeframe: SLOTimeframe
     description: Optional[str] = None
     tags: List[str] = field(default_factory=list)
@@ -139,8 +135,6 @@ class SLOConfigStatus(BaseModel):
 
 
 class ValidationPillar(str, Enum):
-    """Pilares de validação."""
-
     RESILIENCE = "resilience"
     SECURITY = "security"
     COST = "cost"
@@ -150,8 +144,6 @@ class ValidationPillar(str, Enum):
 
 
 class ValidationRuleType(str, Enum):
-    """Tipos de regras de validação."""
-
     BOOLEAN = "boolean"  # Passa/falha
     NUMERIC = "numeric"  # Valor numérico com thresholds
     ENUM = "enum"  # Valor em lista permitida
@@ -159,8 +151,6 @@ class ValidationRuleType(str, Enum):
 
 
 class ValidationSeverity(str, Enum):
-    """Severidade da violação."""
-
     CRITICAL = "critical"
     ERROR = "error"
     WARNING = "warning"
@@ -170,8 +160,6 @@ class ValidationSeverity(str, Enum):
 
 @dataclass
 class ValidationRule:
-    """Regra de validação configurável."""
-
     id: str
     pillar: ValidationPillar
     name: str
@@ -210,8 +198,6 @@ class ValidationRule:
 
 @dataclass
 class ValidationResult:
-    """Resultado de uma validação individual."""
-
     rule_id: str
     rule_name: str
     pillar: ValidationPillar
@@ -233,8 +219,6 @@ class ValidationResult:
 
 @dataclass
 class PillarScore:
-    """Pontuação de um pilar específico."""
-
     pillar: ValidationPillar
     score: float  # 0-100
     max_score: float
@@ -246,8 +230,6 @@ class PillarScore:
 
 @dataclass
 class ResourceScorecard:
-    """Scorecard completo de um recurso."""
-
     resource_name: str
     resource_namespace: str
     resource_kind: str
@@ -270,7 +252,6 @@ class ResourceScorecard:
     criticality_level: str = CriticalityLevel.STANDARD.value
 
     def to_dict(self) -> Dict[str, Any]:
-        """Converte para dicionário para serialização."""
         return {
             "resource_name": self.resource_name,
             "resource_namespace": self.resource_namespace,
@@ -298,8 +279,6 @@ class ResourceScorecard:
 
 @dataclass
 class ScorecardConfig:
-    """Configuração do sistema de scorecard."""
-
     rules: List[ValidationRule] = field(default_factory=list)
 
     notify_critical_threshold: float = 70.0

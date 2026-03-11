@@ -22,10 +22,7 @@ from src.domain.slack_models import (
 
 
 class TestDomainModels:
-    """Test domain models."""
-
     def test_slo_model(self):
-        """Test SLO model creation."""
         slo = SLO(
             name="test-slo",
             service_name="test-service",
@@ -46,7 +43,6 @@ class TestDomainModels:
         assert slo.slo_id == "test-id"
 
     def test_service_definition(self):
-        """Test ServiceDefinition model."""
         service_def = ServiceDefinition(
             dd_service="test-service",
             description="Test service",
@@ -61,7 +57,6 @@ class TestDomainModels:
         assert len(service_def.tags) == 1
 
     def test_slo_config_spec(self):
-        """Test SLOConfigSpec validation."""
         spec = SLOConfigSpec(
             service="test-service",
             type=SLOType.METRIC,
@@ -76,7 +71,6 @@ class TestDomainModels:
         assert 0 <= spec.target <= 100
 
     def test_validation_rule(self):
-        """Test ValidationRule model."""
         rule = ValidationRule(
             id="TEST-001",
             pillar=ValidationPillar.RESILIENCE,
@@ -93,7 +87,6 @@ class TestDomainModels:
         assert rule.enabled is True
 
     def test_slack_models(self):
-        """Test Slack models."""
         # Test NotificationSeverity enum
         assert NotificationSeverity.INFO.value == "info"
         assert NotificationSeverity.CRITICAL.value == "critical"
@@ -125,7 +118,6 @@ class TestDomainModels:
         assert notification.channel == NotificationChannel.OPERATIONAL
 
     def test_resource_scorecard(self):
-        """Test ResourceScorecard model."""
         scorecard = ResourceScorecard(
             resource_name="test-deployment",
             resource_namespace="default",

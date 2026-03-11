@@ -15,11 +15,8 @@ sys.modules["kopf"] = MockKopf()
 
 
 class TestSlackRepository:
-    """Test Slack repository with mocked SDK."""
-
     @pytest.fixture
     def slack_repo(self):
-        """Create SlackRepository with mocked clients."""
         with patch(
             "src.infrastructure.slack.repository.AsyncWebClient"
         ) as mock_web_client:
@@ -50,7 +47,6 @@ class TestSlackRepository:
 
     @pytest.fixture
     def sample_notification(self):
-        """Create sample notification."""
         return SlackNotification(
             title="Test Notification",
             message="Test message content",
@@ -63,7 +59,6 @@ class TestSlackRepository:
 
     @pytest.mark.asyncio
     async def test_send_notification_via_webhook(self, slack_repo, sample_notification):
-        """Test sending notification via webhook."""
         # Mock the webhook send
         slack_repo._webhook_client.send.return_value = Mock(status_code=200)
 
@@ -74,7 +69,6 @@ class TestSlackRepository:
 
     @pytest.mark.asyncio
     async def test_send_notification_via_bot(self, slack_repo, sample_notification):
-        """Test sending notification via bot token when webhook fails."""
         # Make webhook fail
         slack_repo._webhook_client.send.return_value = Mock(status_code=500)
 
@@ -88,7 +82,6 @@ class TestSlackRepository:
         slack_repo._bot_client.chat_postMessage.assert_called_once()
 
     def test_should_send_filtering(self, slack_repo):
-        """Test notification filtering logic."""
         notification = SlackNotification(
             title="Test",
             message="Test",
@@ -121,7 +114,6 @@ class TestSlackRepository:
         assert slack_repo._should_send(notification) is False
 
     def test_health_check(self, slack_repo):
-        """Test health check."""
         health = slack_repo.health_check()
 
         assert "enabled" in health
@@ -133,11 +125,8 @@ class TestSlackRepository:
 
 
 class TestSlackNotificationService:
-    """Test Slack notification service."""
-
     @pytest.fixture
     def mock_notifier(self):
-        """Mock Slack notifier port."""
         mock = AsyncMock()
         mock.send_notification.return_value = True
         mock.send_kopf_event.return_value = True
@@ -148,12 +137,14 @@ class TestSlackNotificationService:
 
     @pytest.fixture
     def slack_service(self, mock_notifier):
-        """Create SlackNotificationService with mocked notifier."""
         return SlackNotificationService(mock_notifier)
 
     @pytest.mark.asyncio
     async def test_send_notification(self, slack_service, mock_notifier):
-        """Test sending notification through service."""
+        # Initialize first so the service is enabled
+        slack_service._initialized = True
+        mock_notifier.send_notification.return_value = True
+
         success = await slack_service.send_notification(
             title="Test",
             message="Test message",
@@ -161,12 +152,11 @@ class TestSlackNotificationService:
             channel=NotificationChannel.OPERATIONAL,
         )
 
-        assert success is False
+        assert success is True
         mock_notifier.send_notification.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_initialize_service(self, slack_service, mock_notifier):
-        """Test service initialization."""
         success = await slack_service.initialize()
 
         assert success is True
@@ -175,7 +165,6 @@ class TestSlackNotificationService:
 
     @pytest.mark.asyncio
     async def test_test_connection(self, slack_service, mock_notifier):
-        """Test connection testing."""
         # Service needs to be initialized first
         slack_service._initialized = True
 
@@ -185,7 +174,6 @@ class TestSlackNotificationService:
         mock_notifier.send_notification.assert_called_once()
 
     def test_service_status(self, slack_service):
-        """Test service status reporting."""
         slack_service._initialized = True
         status = slack_service.get_status()
 
@@ -194,7 +182,6 @@ class TestSlackNotificationService:
         assert status["notifier_available"] is True
 
     def test_is_enabled(self, slack_service):
-        """Test is_enabled property."""
         slack_service._initialized = True
         assert slack_service.is_enabled() is True
 

@@ -36,7 +36,8 @@ dev = [
     "safety>=2.3.5,<3.0.0",
     "ruff>=0.14.13,<0.15.0",
     "vulture>=2.14.0,<3.0.0",
-    "types-pyyaml>=6.0.0,<7.0.0"
+    "types-pyyaml>=6.0.0,<7.0.0",
+    "pylint (>=4.0.5,<5.0.0)"
     ]
 
 [tool.black]
@@ -83,6 +84,10 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 
+[[tool.mypy.overrides]]
+module = ["kubernetes", "kubernetes.*", "requests", "requests.*", "kopf", "kopf.*", "datadog_api_client.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 target-version = "py312"
 line-length = 88
@@ -111,6 +116,37 @@ exclude = [
     "build",
     "dist",
 ]
+
+[tool.pylint.messages_control]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "logging-fstring-interpolation",
+    "broad-exception-caught",
+    "too-many-instance-attributes",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "wrong-import-order",
+    "wrong-import-position",
+    "import-outside-toplevel",
+    "protected-access",
+    "no-member",
+    "too-few-public-methods",
+    "line-too-long",
+    "unused-argument",
+    "unused-import",
+    "f-string-without-interpolation",
+    "global-statement",
+    "invalid-name",
+]
+
+[tool.pylint.design]
+max-locals = 30
+max-branches = 35
+max-statements = 120
+max-returns = 10
+max-bool-expr = 10
 
 [tool.coverage.run]
 source = ["src"]

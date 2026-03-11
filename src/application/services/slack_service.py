@@ -51,7 +51,7 @@ class SlackNotificationService:
         channel: NotificationChannel = NotificationChannel.OPERATIONAL,
         namespace: Optional[str] = None,
         pod_name: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         if not self.is_enabled():
             logger.debug(f"Slack desabilitado, ignorando: {title}")
@@ -73,7 +73,7 @@ class SlackNotificationService:
                 },
             )
 
-            success = await self.notifier.send_notification(notification)
+            success = await self.notifier.send_notification(notification)  # type: ignore[union-attr]
 
             if success:
                 logger.debug(
@@ -107,7 +107,7 @@ class SlackNotificationService:
         reason: str,
         message: str,
         severity: Optional[NotificationSeverity] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         if not self.is_enabled():
             return False

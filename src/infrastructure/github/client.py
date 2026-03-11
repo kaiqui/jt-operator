@@ -10,8 +10,6 @@ GITHUB_API_BASE = "https://api.github.com"
 
 
 class GitHubAPIClient:
-    """Cliente HTTP assíncrono para a API REST do GitHub."""
-
     def __init__(self, token: str, timeout: float = 30.0) -> None:
         self._token = token
         self._timeout = timeout
@@ -39,7 +37,6 @@ class GitHubAPIClient:
         path: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Executa GET e retorna a resposta como lista (endpoints que retornam arrays)."""
         url = f"{GITHUB_API_BASE}{path}"
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             response = await http.get(url, headers=self._headers, params=params)

@@ -1,18 +1,10 @@
-"""
-domain/enriched_scorecard.py
-
-Modelo de domínio que representa um ResourceScorecard enriquecido com dados
-de ownership (Backstage) e custo (CAST AI). Sem dependência de banco de dados —
-tudo em memória, gerado sob demanda e opcionalmente cacheado no operador.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from src.domain.models import ResourceScorecard, ValidationPillar
-
+from src.domain.models import ResourceScorecard
 
 # ---------------------------------------------------------------------------
 # Perfil de ownership vindo do Backstage
@@ -21,8 +13,6 @@ from src.domain.models import ResourceScorecard, ValidationPillar
 
 @dataclass
 class BackstageProfile:
-    """Metadados de ownership extraídos do catálogo Backstage."""
-
     # Identificação no catálogo
     entity_ref: str  # Ex: "component:default/payment-api"
     component_name: str
@@ -48,7 +38,6 @@ class BackstageProfile:
 
     @classmethod
     def unknown(cls, component_name: str) -> "BackstageProfile":
-        """Perfil fallback quando o Backstage não retorna dados."""
         return cls(
             entity_ref=f"component:unknown/{component_name}",
             component_name=component_name,
@@ -65,8 +54,6 @@ class BackstageProfile:
 
 @dataclass
 class CostProfile:
-    """Dados de custo e eficiência extraídos do CAST AI."""
-
     # Custo mensal estimado (USD ou moeda configurada)
     monthly_cost_usd: float = 0.0
 
@@ -88,7 +75,6 @@ class CostProfile:
     # Indicadores derivados
     @property
     def cpu_efficiency_pct(self) -> Optional[float]:
-        """Percentual de utilização de CPU em relação ao que foi requestado."""
         if self.cpu_requested_millicores and self.cpu_used_avg_millicores:
             return round(
                 (self.cpu_used_avg_millicores / self.cpu_requested_millicores) * 100, 1
@@ -105,7 +91,6 @@ class CostProfile:
 
     @property
     def waste_usd(self) -> float:
-        """Custo desperdiçado = potencial de saving ainda não realizado."""
         return round(self.potential_savings_usd, 2)
 
     # Timestamp da consulta
@@ -113,7 +98,6 @@ class CostProfile:
 
     @classmethod
     def unavailable(cls) -> "CostProfile":
-        """Perfil fallback quando o CAST AI não retorna dados."""
         return cls()
 
 
@@ -124,13 +108,6 @@ class CostProfile:
 
 @dataclass
 class EnrichedScorecard:
-    """
-    Scorecard de saúde enriquecido com dados de ownership e custo.
-
-    É gerado sob demanda pelo ScorecardEnricher e mantido em memória
-    no ScorecardsStore. Não requer persistência em banco de dados.
-    """
-
     # Scorecard original (calculado pelo ScorecardService)
     scorecard: ResourceScorecard
 
@@ -174,10 +151,6 @@ class EnrichedScorecard:
 
     @property
     def cost_per_score_point(self) -> Optional[float]:
-        """
-        USD por ponto de score. Quanto menor, mais eficiente.
-        Retorna None se o score for 0 (evita divisão por zero).
-        """
         if self.overall_score > 0 and self.cost.monthly_cost_usd > 0:
             return round(self.cost.monthly_cost_usd / self.overall_score, 2)
         return None
@@ -187,7 +160,6 @@ class EnrichedScorecard:
     # ---------------------------------------------------------------------------
 
     def to_slack_summary(self) -> Dict[str, Any]:
-        """Resumo compacto para mensagem Slack."""
         score_emoji = (
             "🟢"
             if self.overall_score >= 90
@@ -228,7 +200,6 @@ class EnrichedScorecard:
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialização completa para API/logs."""
         return {
             "service": self.service_name,
             "namespace": self.namespace,

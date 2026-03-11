@@ -11,11 +11,8 @@ sys.modules["kopf"] = MockKopf()
 
 
 class TestDatadogRepository:
-    """Test Datadog repository with mocked API."""
-
     @pytest.fixture
     def mock_slo_manager(self):
-        """Mock SLOManager."""
         mock_manager = Mock(spec=SLOManager)
 
         # Mock search response
@@ -55,7 +52,6 @@ class TestDatadogRepository:
 
     @pytest.fixture
     def datadog_repo(self, mock_slo_manager):
-        """Create DatadogRepository with mocked factory."""
         with patch(
             "src.infrastructure.datadog.repository.DatadogManagerFactory"
         ) as mock_factory:
@@ -73,7 +69,6 @@ class TestDatadogRepository:
             return repo
 
     def test_get_service_slos(self, datadog_repo, mock_slo_manager):
-        """Test getting SLOs for a service."""
         slos = datadog_repo.get_service_slos("test-service")
 
         assert len(slos) == 1
@@ -85,7 +80,6 @@ class TestDatadogRepository:
         mock_slo_manager.search_slos_by_service.assert_called_once_with("test-service")
 
     def test_create_slo(self, datadog_repo, mock_slo_manager):
-        """Test creating a SLO."""
         slo = SLO(
             name="new-slo",
             service_name="test-service",
@@ -103,7 +97,6 @@ class TestDatadogRepository:
         mock_slo_manager.create_service_level_objective.assert_called_once()
 
     def test_update_slo(self, datadog_repo, mock_slo_manager):
-        """Test updating a SLO."""
         slo = SLO(
             name="updated-slo",
             service_name="test-service",
@@ -120,8 +113,6 @@ class TestDatadogRepository:
         mock_slo_manager.update_service_level_objective.assert_called_once()
 
     def test_extract_slo_id_from_response(self, datadog_repo):
-        """Test SLO ID extraction from various response formats."""
-
         # Test format 1: direct id in response
         response1 = {"slo_id": "test-id-1"}
         id1 = datadog_repo._extract_slo_id_from_response(response1)
@@ -149,11 +140,8 @@ class TestDatadogRepository:
 
 
 class TestSLOManager:
-    """Test SLOManager with mocked Datadog API."""
-
     @pytest.fixture
     def slo_manager(self):
-        """Create SLOManager with mocked API client."""
         with patch(
             "src.infrastructure.datadog.managers.slo.ServiceLevelObjectivesApi"
         ) as mock_api:
@@ -167,7 +155,6 @@ class TestSLOManager:
             return manager
 
     def test_create_slo_with_thresholds(self, slo_manager):
-        """Test SLO creation with provided thresholds."""
         with patch.object(slo_manager, "execute_with_retry") as mock_execute:
             mock_response = Mock()
             mock_response.to_dict.return_value = {"data": {"id": "test-id"}}
@@ -187,7 +174,6 @@ class TestSLOManager:
             mock_execute.assert_called_once()
 
     def test_search_slos_by_service(self, slo_manager):
-        """Test searching SLOs by service."""
         with patch.object(slo_manager, "execute_with_retry") as mock_execute:
             mock_response = Mock()
             mock_response.to_dict.return_value = {

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class NotificationSeverity(Enum):
@@ -60,18 +60,18 @@ class SlackConfig(BaseModel):
         default_factory=lambda: SlackMessageTemplate(title="Kopf Notification")
     )
 
-    class Config:
-        use_enum_values = True
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(use_enum_values=True, arbitrary_types_allowed=True)
 
-    @validator("enabled_severities", pre=True)
-    def parse_enabled_severities(cls, v):
+    @field_validator("enabled_severities", mode="before")
+    @classmethod
+    def parse_enabled_severities(cls, v: Any) -> Any:
         if isinstance(v, list) and v and isinstance(v[0], str):
             return [NotificationSeverity(s) for s in v]
         return v
 
-    @validator("enabled_channels", pre=True)
-    def parse_enabled_channels(cls, v):
+    @field_validator("enabled_channels", mode="before")
+    @classmethod
+    def parse_enabled_channels(cls, v: Any) -> Any:
         if isinstance(v, list) and v and isinstance(v[0], str):
             return [NotificationChannel(c) for c in v]
         return v

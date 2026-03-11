@@ -6,14 +6,13 @@ from src.application.services.slack_service import SlackNotificationService
 
 
 class TestMockedSlackIntegration:
-    """Integration tests with mocked Slack API."""
-
     @pytest.fixture
     def mock_slack_clients(self):
-        """Mock Slack clients."""
-        with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_web_client:
+        with patch(
+            "src.infrastructure.slack.repository.AsyncWebClient"
+        ) as mock_web_client:
             with patch(
-                "slack_sdk.webhook.async_client.AsyncWebhookClient"
+                "src.infrastructure.slack.repository.AsyncWebhookClient"
             ) as mock_webhook_client:
                 # Mock bot client
                 mock_bot = AsyncMock()
@@ -29,7 +28,6 @@ class TestMockedSlackIntegration:
 
     @pytest.mark.asyncio
     async def test_slack_repository_integration(self, mock_slack_clients):
-        """Test SlackRepository integration."""
         # Create repository
         repo = SlackRepository(
             bot_token="test-token",
@@ -63,7 +61,6 @@ class TestMockedSlackIntegration:
 
     @pytest.mark.asyncio
     async def test_slack_service_integration(self):
-        """Test SlackNotificationService integration."""
         # Mock notifier
         mock_notifier = AsyncMock()
         mock_notifier.send_notification.return_value = True

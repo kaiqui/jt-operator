@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Optional
+from typing import Any, Optional
 from functools import lru_cache
 
 from src.settings import settings
@@ -20,16 +20,15 @@ from src.application.services.scorecard_service import ScorecardService
 from src.application.services.slo_metrics_service import SLOMetricsService
 from src.utils.json_logger import configure_logging, get_logger
 
-
 logger = get_logger(__name__)
 
 
-def init_logging():
+def init_logging() -> None:
     configure_logging(logging.INFO)
 
 
 @lru_cache()
-def get_backstage_enricher():
+def get_backstage_enricher() -> Any:
     from src.infrastructure.backstage.enricher import BackstageEnricher
 
     if not settings.enable_backstage_enrichment:
@@ -55,7 +54,7 @@ def get_backstage_enricher():
 
 
 @lru_cache()
-def get_castai_cost_enricher():
+def get_castai_cost_enricher() -> Any:
     from src.infrastructure.castai.cost_enricher import CastaiCostEnricher
 
     if not settings.enable_castai_cost_enrichment:
@@ -147,7 +146,7 @@ def get_slo_metrics_service() -> Optional[SLOMetricsService]:
 
 
 @lru_cache()
-def get_status_writer():
+def get_status_writer() -> KubernetesStatusWriter:
     return KubernetesStatusWriter()
 
 
@@ -294,7 +293,7 @@ def get_slack_service() -> Optional[SlackNotificationService]:
     return service
 
 
-async def initialize_slack_service():
+async def initialize_slack_service() -> None:
     slack_service = get_slack_service()
 
     if slack_service:
@@ -312,7 +311,7 @@ async def initialize_slack_service():
             logger.exception(f"Erro ao inicializar Slack service: ")
 
 
-async def shutdown_slack_service():
+async def shutdown_slack_service() -> None:
     slack_service = get_slack_service()
 
     if slack_service:
@@ -366,7 +365,7 @@ def get_slo_service() -> Optional[SLOService]:
 
 
 @lru_cache()
-def get_github_repository():
+def get_github_repository() -> Any:
     from src.infrastructure.github.client import GitHubAPIClient
     from src.infrastructure.github.repository import GitHubRepository
 
@@ -406,7 +405,7 @@ def get_remediation_writer() -> Optional[RemediationWriter]:
 
 
 @lru_cache()
-def get_remediation_service():
+def get_remediation_service() -> Any:
     from src.application.services.remediation_service import RemediationService
 
     github_repo = get_github_repository()

@@ -41,6 +41,14 @@ class SLOService:
                         },
                     )
 
+                    if not existing_slo.slo_id:
+                        return {
+                            "success": False,
+                            "action": "updated",
+                            "slo_id": None,
+                            "slo_name": slo_uid,
+                            "error": "SLO ID não disponível para atualização",
+                        }
                     success = self.datadog_port.update_slo_apps(
                         existing_slo.slo_id, desired_slo
                     )
@@ -71,7 +79,7 @@ class SLOService:
     def _compare_slo_parameters(
         self, existing_slo: SLO, desired_slo: SLO
     ) -> Dict[str, Any]:
-        changes = {}
+        changes: Dict[str, Any] = {}
 
         # Compara target_threshold
         existing_target = (
@@ -184,7 +192,8 @@ class SLOService:
 
     def delete_slo(self, slo_id: str) -> bool:
         self.logger.info("Deletando SLO", extra={"slo_id": slo_id})
-        return self.datadog_port.delete_slo(slo_id)
+        result: bool = self.datadog_port.delete_slo(slo_id)
+        return result
 
     def get_service_slos(self, service_name: str) -> List[SLO]:
         return self.datadog_port.get_service_slos(service_name)

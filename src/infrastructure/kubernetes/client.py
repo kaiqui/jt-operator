@@ -1,6 +1,3 @@
-"""
-Factory simples para APIs do Kubernetes (aplicações usam esse módulo).
-"""
 from typing import Tuple
 from kubernetes import client, config
 from src.utils.json_logger import get_logger

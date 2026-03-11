@@ -10,8 +10,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 # Mock kopf first to avoid metaclass conflicts
 class MockKopf:
-    """Mock kopf module."""
-
     class TemporaryError(Exception):
         def __init__(self, message, delay=60):
             self.message = message
@@ -19,8 +17,6 @@ class MockKopf:
             super().__init__(message)
 
     class _OnNamespace:
-        """Mock kopf.on namespace."""
-
         @staticmethod
         def startup():
             def decorator(func):
@@ -100,7 +96,6 @@ sys.modules["kopf"] = MockKopf()
 
 @pytest.fixture(autouse=True)
 def mock_all_external_calls():
-    """Auto-mock all external API calls."""
     patches = []
 
     # Mock Kubernetes config
@@ -206,7 +201,6 @@ def mock_all_external_calls():
 
 @pytest.fixture
 def mock_settings():
-    """Mock settings for testing."""
     with patch("src.settings.settings") as mock_settings:
         # Create a proper mock with all required attributes
         mock_settings.enable_scorecard_controller = True
@@ -232,7 +226,6 @@ def mock_settings():
 
 @pytest.fixture
 def mock_kube_state_store():
-    """Mock KubeStateStore."""
     with patch(
         "src.infrastructure.kubernetes.state_store.KubeStateStore"
     ) as mock_store:
@@ -245,7 +238,6 @@ def mock_kube_state_store():
 
 @pytest.fixture
 def mock_datadog_api():
-    """Mock Datadog API client."""
     with patch("src.infrastructure.datadog.client.ApiClient") as mock_api_client:
         with patch("src.infrastructure.datadog.client.Configuration") as mock_config:
             mock_api = Mock()
@@ -256,7 +248,6 @@ def mock_datadog_api():
 
 @pytest.fixture
 def mock_slack_sdk():
-    """Mock Slack SDK."""
     with patch("src.infrastructure.slack.repository.AsyncWebClient") as mock_web_client:
         with patch(
             "src.infrastructure.slack.repository.AsyncWebhookClient"
@@ -270,7 +261,6 @@ def mock_slack_sdk():
 
 @pytest.fixture
 def sample_slo_config():
-    """Sample SLO configuration."""
     return {
         "name": "test-slo",
         "service": "test-service",
@@ -285,7 +275,6 @@ def sample_slo_config():
 
 @pytest.fixture
 def sample_kubernetes_deployment():
-    """Sample Kubernetes Deployment."""
     return {
         "metadata": {
             "name": "test-deployment",
@@ -318,7 +307,6 @@ def sample_kubernetes_deployment():
 
 @pytest.fixture
 def async_context():
-    """Provide async context for tests."""
     import asyncio
 
     def run_async(coro):
@@ -330,7 +318,6 @@ def async_context():
 # Fixture específica para mockar o ScorecardController
 @pytest.fixture
 def mock_scorecard_controller_deps():
-    """Mock all dependencies for ScorecardController."""
     with patch(
         "src.controllers.scorecard_controller.get_scorecard_service"
     ) as mock_get_scorecard:

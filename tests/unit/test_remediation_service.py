@@ -1,17 +1,3 @@
-"""
-Testes unitários para RemediationService.
-
-Cobre:
-- Verificação de pré-condição DD_GIT_REPOSITORY_URL
-- Extração e parse da URL do repositório
-- Coleta de métricas Datadog (com e sem dados)
-- Modificação precisa do deploy.yaml (resources e HPA)
-- Fluxo completo de criação do PR
-- Idempotência: trava em memória e verificação de PR existente
-- Tratamento de erros em cada etapa
-- Notificação Slack após o PR
-- Valores sugeridos pelo DatadogProfilingMetrics
-"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,7 +28,6 @@ from src.settings import RemediationSettings
 
 
 def _make_body(dd_repo_url: str = "https://github.com/org/my-app") -> dict:
-    """Cria um body de Deployment K8s com DD_GIT_REPOSITORY_URL configurado."""
     return {
         "spec": {
             "template": {
@@ -90,7 +75,8 @@ def mock_github_port():
     port.branch_exists.return_value = False
     port.create_branch.return_value = True
     port.commit_files.return_value = True
-    port.find_open_remediation_pr.return_value = None  # sem PR existente por padrão
+    port.find_open_remediation_pr.return_value = None
+    port.find_merged_remediation_pr.return_value = None
     port.get_file_content.return_value = (
         "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n"
         "spec:\n  template:\n    spec:\n      containers:\n"
@@ -274,7 +260,6 @@ class TestExtractGitRepo:
 # Testes de _modify_deploy_yaml
 # ---------------------------------------------------------------------------
 
-
 _DEPLOY_YAML_WITH_RESOURCES = """\
 apiVersion: apps/v1
 kind: Deployment
@@ -395,7 +380,6 @@ class TestModifyDeployYaml:
         assert categories == []
 
     def test_preserva_comentarios_yaml(self, service):
-        """ruamel.yaml deve preservar comentários existentes no arquivo."""
         resource_issue = RemediationIssue(
             rule_id="RES-003", rule_name="CPU", description="d", remediation="f"
         )
@@ -444,7 +428,6 @@ class TestCreateRemediationPr:
     async def test_idempotencia_pr_existente_aborta(
         self, service, mock_github_port, base_request
     ):
-        """Se já existe um PR aberto para o recurso, deve abortar sem criar novo."""
         existing = PullRequestResult(
             number=10,
             title="fix(default/my-app): RESOURCES — 1 issue(s)",
@@ -464,10 +447,45 @@ class TestCreateRemediationPr:
         mock_github_port.create_pull_request.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_pr_mergeada_aborta_sem_criar_nova(
+        self, service, mock_github_port, base_request
+    ):
+        merged = PullRequestResult(
+            number=20,
+            title="fix(default/my-app): RESOURCES — 1 issue(s)",
+            url="https://github.com/org/my-app/pull/20",
+            branch="fix/auto-remediation-default-my-app-20240101000000",
+            base_branch="develop",
+        )
+        mock_github_port.find_open_remediation_pr.return_value = None
+        mock_github_port.find_merged_remediation_pr.return_value = merged
+
+        result = await service.create_remediation_pr(base_request)
+
+        assert result.success is False
+        assert result.pull_request is not None
+        assert result.pull_request.number == 20
+        assert "mergeada" in (result.error or "").lower()
+        mock_github_port.create_branch.assert_not_called()
+        mock_github_port.create_pull_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pr_cancelada_cria_nova_pr(
+        self, service, mock_github_port, base_request
+    ):
+        mock_github_port.find_open_remediation_pr.return_value = None
+        mock_github_port.find_merged_remediation_pr.return_value = None
+
+        result = await service.create_remediation_pr(base_request)
+
+        assert result.success is True
+        mock_github_port.create_branch.assert_called_once()
+        mock_github_port.create_pull_request.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_idempotencia_trava_em_memoria(
         self, service, mock_github_port, base_request
     ):
-        """Chave em _pending deve bloquear execução concorrente."""
         repo_info = service._extract_git_repo(base_request.resource_body)
         assert repo_info is not None
         repo_owner, repo_name = repo_info
@@ -487,7 +505,6 @@ class TestCreateRemediationPr:
     async def test_trava_liberada_apos_execucao(
         self, service, mock_github_port, base_request
     ):
-        """Chave deve ser removida de _pending mesmo em caso de falha."""
         mock_github_port.create_branch.return_value = False  # força falha
 
         await service.create_remediation_pr(base_request)
@@ -499,7 +516,6 @@ class TestCreateRemediationPr:
     async def test_usa_repo_da_dd_git_url(
         self, service, mock_github_port, base_request
     ):
-        """repo_owner e repo_name devem vir de DD_GIT_REPOSITORY_URL."""
         base_request.resource_body = _make_body("https://github.com/myorg/myrepo")
         await service.create_remediation_pr(base_request)
 
@@ -512,7 +528,6 @@ class TestCreateRemediationPr:
     async def test_arquivo_modificado_e_deploy_yaml(
         self, service, mock_github_port, base_request
     ):
-        """O arquivo commitado deve ser sempre manifests/kubernetes/main/deploy.yaml."""
         await service.create_remediation_pr(base_request)
 
         commit_call = mock_github_port.commit_files.call_args
@@ -576,7 +591,6 @@ class TestBuildPrBody:
         assert "revisao humana" in body.lower()
 
     def test_body_nao_contem_ia(self, service, base_request):
-        """Não deve haver referências a 'IA' ou 'inteligencia artificial'."""
         body = service._build_pr_body(base_request, ["resources"], None)
         assert "inteligencia artificial" not in body.lower()
         assert "[ia]" not in body.lower()
@@ -809,7 +823,6 @@ class TestDetectHpaProfile:
     def test_annotation_tem_prioridade_sobre_datadog(
         self, service_with_datadog, mock_datadog
     ):
-        """Annotation high deve retornar RIGID sem consultar Datadog."""
         body = self._make_body_with_annotation("high")
         profile = service_with_datadog._detect_hpa_profile(body, "app")
         assert profile == HPAProfile.RIGID

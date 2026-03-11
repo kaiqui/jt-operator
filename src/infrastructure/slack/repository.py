@@ -1,6 +1,3 @@
-"""
-Implementação simplificada do repositório Slack usando SDK oficial.
-"""
 import asyncio
 from typing import Optional, Dict, Any, List
 
@@ -30,8 +27,8 @@ class SlackRepository(SlackNotifierPort):
         enabled: bool = True,
         timeout_seconds: float = 10.0,
         rate_limit_per_minute: int = 60,
-        enabled_severities: List[NotificationSeverity] = None,
-        enabled_channels: List[NotificationChannel] = None,
+        enabled_severities: Optional[List[NotificationSeverity]] = None,
+        enabled_channels: Optional[List[NotificationChannel]] = None,
         message_template: Optional[SlackMessageTemplate] = None,
         operator_name: str = "titlis-operator",
     ):
@@ -225,7 +222,7 @@ class SlackRepository(SlackNotifierPort):
         reason: str,
         message: str,
         severity: Optional[NotificationSeverity] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> bool:
         # Determina severidade automática
         if severity is None:
@@ -255,24 +252,25 @@ class SlackRepository(SlackNotifierPort):
 
         return await self.send_notification(notification)
 
-    async def _send_via_webhook(self, blocks: list, text: str) -> bool:
+    async def _send_via_webhook(self, blocks: List[Any], text: str) -> bool:
         try:
-            payload = {
-                "text": text,
-                "blocks": blocks,
-                "username": self.operator_name,
-                "icon_emoji": ":kubernetes:",
-            }
+            if not self._webhook_client:
+                return False
 
-            response = await self._webhook_client.send(**payload)
+            response = await self._webhook_client.send(
+                text=text,
+                blocks=blocks,
+            )
             return response.status_code == 200
 
         except Exception:
             logger.exception("Erro ao enviar via webhook: ")
             return False
 
-    async def _send_via_bot(self, blocks: list, text: str, channel: str) -> bool:
+    async def _send_via_bot(self, blocks: List[Any], text: str, channel: str) -> bool:
         try:
+            if not self._bot_client:
+                return False
             response = await self._bot_client.chat_postMessage(
                 channel=channel,
                 text=text,
@@ -290,7 +288,7 @@ class SlackRepository(SlackNotifierPort):
             logger.exception("Erro ao enviar via bot")
             return False
 
-    async def _reset_message_count(self):
+    async def _reset_message_count(self) -> None:
         await asyncio.sleep(60)
         self._message_count = 0
         logger.debug("Contador de mensagens resetado")

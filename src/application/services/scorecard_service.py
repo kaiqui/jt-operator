@@ -502,25 +502,27 @@ class ScorecardService:
         self, namespace: str, name: str, kind: str
     ) -> Optional[Dict[str, Any]]:
         try:
+            result_dict: Optional[Dict[str, Any]] = None
             if kind == "Deployment":
                 resource = self.apps.read_namespaced_deployment(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "StatefulSet":
                 resource = self.apps.read_namespaced_stateful_set(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "DaemonSet":
                 resource = self.apps.read_namespaced_daemon_set(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "HorizontalPodAutoscaler":
                 resource = (
                     self.autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
                         name, namespace
                     )
                 )
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             else:
                 self.logger.warning(f"Tipo de recurso não suportado: {kind}")
                 return None
+            return result_dict
         except Exception:
             self.logger.exception(f"Erro ao buscar recurso {namespace}/{name}/{kind}: ")
             return None
@@ -532,7 +534,8 @@ class ScorecardService:
         validator = getattr(self, validator_name, None)
 
         if validator:
-            return validator(rule, resource, namespace, name)
+            result: ValidationResult = validator(rule, resource, namespace, name)
+            return result
         else:
             return self._validate_generic(rule, resource, namespace, name)
 
@@ -672,7 +675,7 @@ class ScorecardService:
 
         if isinstance(path_or_func, str):
             parts = path_or_func.split(".")
-            current_value = resource
+            current_value: Optional[Any] = resource
 
             for part in parts:
                 if current_value is None:
@@ -758,7 +761,6 @@ class ScorecardService:
             return False
 
     def _detect_criticality(self, resource: Dict[str, Any]) -> CriticalityLevel:
-        """Detecta o nível de criticidade pela annotation titlis.io/criticality."""
         annotations = (resource.get("metadata") or {}).get("annotations") or {}
         if annotations.get("titlis.io/criticality") == "high":
             return CriticalityLevel.HIGH
@@ -872,7 +874,7 @@ class ScorecardService:
 
             if "cpu" in requests and "cpu" in limits:
 
-                def parse_cpu(cpu_str):
+                def parse_cpu(cpu_str: str) -> float:
                     if cpu_str.endswith("m"):
                         return float(cpu_str[:-1])
                     else:
@@ -882,7 +884,7 @@ class ScorecardService:
                 lim_cpu = parse_cpu(limits["cpu"])
 
                 if req_cpu > 0:
-                    return lim_cpu / req_cpu
+                    return float(lim_cpu / req_cpu)
 
             return None
         except Exception:
@@ -901,7 +903,8 @@ class ScorecardService:
                     metrics = hpa.spec.metrics or []
                     for metric in metrics:
                         if metric.type == "Resource" and metric.resource.name == "cpu":
-                            return metric.resource.target.average_utilization
+                            val = metric.resource.target.average_utilization
+                            return float(val) if val is not None else None
             return None
         except Exception:
             return None
@@ -979,11 +982,13 @@ class ScorecardService:
     def get_validation_summary(self, namespace: str) -> Dict[str, Any]:
         deployments = self.apps.list_namespaced_deployment(namespace).items
 
-        summary = {
+        pillar_scores_dict: Dict[str, List[float]] = defaultdict(list)
+        resources_list: List[Dict[str, Any]] = []
+        summary: Dict[str, Any] = {
             "namespace": namespace,
             "total_resources": len(deployments),
-            "pillar_scores": defaultdict(list),
-            "resources": [],
+            "pillar_scores": pillar_scores_dict,
+            "resources": resources_list,
         }
 
         for deployment in deployments:

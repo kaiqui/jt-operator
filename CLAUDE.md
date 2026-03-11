@@ -5,6 +5,12 @@
 > make lint && make test-unit
 > ```
 > Nunca entregue código sem confirmar que lint e testes passam.
+>
+> **Lint padrão: flake8** — é o único linter de estilo a ser respeitado como gate obrigatório.
+> Configuração em `.flake8` na raiz do projeto.
+>
+> **Regra de docstrings: proibido usar docstrings** (D100–D107 ignorados no flake8).
+> Não adicione docstrings de módulo, classe ou função. O código deve ser autoexplicativo.
 
 ---
 
@@ -788,3 +794,4 @@ make dev               # clean + dev-install + test + lint
 8. **Nunca** importar infrastructure diretamente de domain ou controllers — sempre via ports
 9. Novos serviços externos = Port interface + Adapter + DI em `dependencies.py`
 10. Novas ENV vars = documentar na seção 3 deste arquivo e em `settings.py` com `Field()`
+11. **Nunca** adicionar docstrings — nem de módulo, classe ou função. Lint padrão é **flake8** (regras D100–D107 ignoradas)

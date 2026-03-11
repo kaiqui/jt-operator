@@ -83,7 +83,7 @@ class DatadogClientBase:
             )
             return False
 
-    def execute_with_retry(self, func, *args, **kwargs) -> Any:
+    def execute_with_retry(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         import time
 
         for attempt in range(self.max_retries + 1):

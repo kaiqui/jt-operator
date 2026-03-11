@@ -6,17 +6,13 @@ from unittest.mock import Mock, patch, AsyncMock
 from src.controllers.base import BaseController
 from src.controllers.slo_controller import SLOController
 
-
 # Não importe ScorecardController aqui - vamos importar dinamicamente nos testes que precisam
 # from src.controllers.scorecard_controller import ScorecardController
 
 
 class TestBaseController:
-    """Test base controller functionality."""
-
     @pytest.fixture
     def base_controller(self):
-        """Create BaseController instance."""
         with patch("src.controllers.base.get_status_writer") as mock_status_writer:
             with patch("src.controllers.base.get_slack_service") as mock_slack_service:
                 mock_status_writer.return_value = Mock()
@@ -25,7 +21,6 @@ class TestBaseController:
                 return BaseController("test-controller")
 
     def test_get_resource_context(self, base_controller):
-        """Test extracting resource context from body."""
         body = {
             "metadata": {
                 "name": "test-resource",
@@ -44,7 +39,6 @@ class TestBaseController:
         assert context["controller"] == "test-controller"
 
     def test_update_status(self, base_controller):
-        """Test status update."""
         body = {"metadata": {"name": "test", "namespace": "default"}}
         status = {"state": "ready"}
         context = {"test": "context"}
@@ -60,7 +54,6 @@ class TestBaseController:
 
     @pytest.mark.asyncio
     async def test_send_slack_notification_safe(self, base_controller):
-        """Test safe Slack notification sending."""
         # Test without Slack service
         success = await base_controller._send_slack_notification_safe(
             title="Test", message="Test"
@@ -81,11 +74,8 @@ class TestBaseController:
 
 
 class TestSLOController:
-    """Test SLO controller."""
-
     @pytest.fixture
     def mock_dependencies(self):
-        """Mock all dependencies."""
         with patch(
             "src.controllers.slo_controller.get_slo_service"
         ) as mock_slo_service:
@@ -119,12 +109,10 @@ class TestSLOController:
 
     @pytest.fixture
     def slo_controller_instance(self, mock_dependencies):
-        """Create SLOController instance with mocked dependencies."""
         return SLOController()
 
     @pytest.fixture
     def valid_slo_body(self):
-        """Valid SLOConfig body."""
         return {
             "metadata": {
                 "name": "test-sloconfig",
@@ -146,7 +134,6 @@ class TestSLOController:
     async def test_on_slo_config_change_valid(
         self, slo_controller_instance, valid_slo_body, mock_dependencies
     ):
-        """Test valid SLO config change."""
         result = await slo_controller_instance.on_slo_config_change(
             valid_slo_body, event_type="create"
         )
@@ -165,11 +152,8 @@ class TestSLOController:
 
 
 class TestScorecardController:
-    """Test Scorecard controller."""
-
     @pytest.fixture
     def mock_dependencies(self):
-        """Mock all dependencies."""
         with patch(
             "src.controllers.scorecard_controller.get_scorecard_service"
         ) as mock_scorecard_service:
@@ -200,7 +184,6 @@ class TestScorecardController:
 
     @pytest.fixture
     def scorecard_controller_instance(self, mock_dependencies):
-        """Create ScorecardController instance with mocked dependencies."""
         # Importar dinamicamente após os mocks estarem configurados
         from src.controllers.scorecard_controller import ScorecardController
 
@@ -208,7 +191,6 @@ class TestScorecardController:
 
     @pytest.fixture
     def deployment_body(self):
-        """Sample deployment body."""
         return {
             "metadata": {
                 "name": "test-deployment",
@@ -228,7 +210,6 @@ class TestScorecardController:
     async def test_on_resource_event(
         self, scorecard_controller_instance, deployment_body, mock_dependencies
     ):
-        """Test resource event handling."""
         # Mock the _is_namespace_excluded method
         scorecard_controller_instance._is_namespace_excluded = Mock(return_value=False)
 

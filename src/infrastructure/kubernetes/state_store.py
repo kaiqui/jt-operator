@@ -18,7 +18,7 @@ class KubeStateStore:
         self._lock = threading.Lock()
         self._ensure_cm()
 
-    def _ensure_cm(self):
+    def _ensure_cm(self) -> None:
         try:
             self.core.read_namespaced_config_map(
                 name=self.name, namespace=self.namespace
@@ -57,7 +57,7 @@ class KubeStateStore:
                 )
                 if cm.data and key in cm.data:
                     self._cache[key] = cm.data[key]
-                    return cm.data[key]
+                    return str(cm.data[key])
             except ApiException as e:
                 logger.debug("Erro lendo configmap")
             return None
