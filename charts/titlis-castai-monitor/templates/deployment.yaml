@@ -1,0 +1,201 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "castai-monitor.fullname" . }}
+  labels:
+    {{- include "castai-monitor.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "castai-monitor.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "castai-monitor.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "castai-monitor.serviceAccountName" . }}
+      containers:
+        - name: castai-monitor
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http-metrics
+          env:
+            # ── Datadog (secrets) ───────────────────────────────────────────
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.datadog.secretName }}
+                  key: api-key
+            - name: DD_APP_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.datadog.secretName }}
+                  key: app-key
+
+            # ── CAST AI (secrets) ────────────────────────────────────────────
+            - name: CASTAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: titlis-castai-keys
+                  key: api-key
+                  optional: true
+            - name: CASTAI_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: titlis-castai-keys
+                  key: cluster-id
+                  optional: true
+
+            # ── Downward API ────────────────────────────────────────────────
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+            # ── Operator behavior ───────────────────────────────────────────
+            - name: RECONCILE_INTERVAL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: RECONCILE_INTERVAL_SECONDS
+            - name: DEBOUNCE_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: DEBOUNCE_SECONDS
+            - name: ENABLE_LEADER_ELECTION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_LEADER_ELECTION
+            - name: LEADER_ELECTION_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: LEADER_ELECTION_NAMESPACE
+
+            # ── Kubernetes ──────────────────────────────────────────────────
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: KUBERNETES_NAMESPACE
+            - name: SERVICE_ACCOUNT_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: SERVICE_ACCOUNT_NAME
+
+            # ── Logging ─────────────────────────────────────────────────────
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: LOG_LEVEL
+            - name: LOG_FORMAT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: LOG_FORMAT
+
+            # ── Observability ───────────────────────────────────────────────
+            - name: METRICS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: METRICS_ENABLED
+            - name: TRACING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: TRACING_ENABLED
+
+            # ── Feature flags — todos desabilitados ─────────────────────────
+            - name: ENABLE_SCORECARD_CONTROLLER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_SCORECARD_CONTROLLER
+            - name: ENABLE_SLO_CONTROLLER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_SLO_CONTROLLER
+            - name: ENABLE_AUTO_REMEDIATION
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_AUTO_REMEDIATION
+            - name: ENABLE_BACKSTAGE_ENRICHMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_BACKSTAGE_ENRICHMENT
+            - name: ENABLE_CASTAI_COST_ENRICHMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_CASTAI_COST_ENRICHMENT
+            - name: GITHUB_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: GITHUB_ENABLED
+            - name: SLACK_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: SLACK_ENABLED
+
+            # ── CAST AI Monitor ─────────────────────────────────────────────
+            - name: ENABLE_CASTAI_MONITOR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: ENABLE_CASTAI_MONITOR
+            - name: CASTAI_MONITOR_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: CASTAI_MONITOR_NAMESPACE
+            - name: CASTAI_MONITOR_INTERVAL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: CASTAI_MONITOR_INTERVAL_SECONDS
+            - name: CASTAI_CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: CASTAI_CLUSTER_NAME
+            - name: CASTAI_COST_CACHE_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: CASTAI_COST_CACHE_TTL_SECONDS
+
+            # ── Datadog config ──────────────────────────────────────────────
+            - name: DD_SITE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "castai-monitor.fullname" . }}-config
+                  key: DD_SITE
+
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10

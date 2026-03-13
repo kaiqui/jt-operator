@@ -18,7 +18,6 @@ logger = get_logger(__name__)
 
 
 class AppScorecardWriter:
-
     def __init__(self) -> None:
         self._api: Optional[client.CustomObjectsApi] = None
 
@@ -51,19 +50,31 @@ class AppScorecardWriter:
             self._update(existing, body, namespace, name)
             logger.debug(
                 "AppScorecard atualizado",
-                extra={"resource_name": name, "namespace": namespace, "score": scorecard.overall_score},
+                extra={
+                    "resource_name": name,
+                    "namespace": namespace,
+                    "score": scorecard.overall_score,
+                },
             )
         except ApiException as exc:
             if exc.status == 404:
                 self._create(body, namespace, name)
                 logger.info(
                     "AppScorecard criado",
-                    extra={"resource_name": name, "namespace": namespace, "score": scorecard.overall_score},
+                    extra={
+                        "resource_name": name,
+                        "namespace": namespace,
+                        "score": scorecard.overall_score,
+                    },
                 )
             else:
                 logger.error(
                     "Erro ao fazer upsert do AppScorecard",
-                    extra={"resource_name": name, "namespace": namespace, "status": exc.status},
+                    extra={
+                        "resource_name": name,
+                        "namespace": namespace,
+                        "status": exc.status,
+                    },
                 )
                 raise
 
@@ -208,7 +219,11 @@ class AppScorecardWriter:
     ) -> Dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
 
-        if scorecard.critical_issues > 0 or scorecard.error_issues > 0 or scorecard.overall_score < 80:
+        if (
+            scorecard.critical_issues > 0
+            or scorecard.error_issues > 0
+            or scorecard.overall_score < 80
+        ):
             compliance = "non_compliant"
         else:
             compliance = "compliant"

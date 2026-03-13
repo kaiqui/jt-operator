@@ -1,0 +1,9 @@
+apiVersion: v1
+name: titlis-castai-monitor
+description: "Titlis Operator — modo somente CAST AI Monitor"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: "SRE Team"
+    email: sre@example.com

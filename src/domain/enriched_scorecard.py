@@ -1,43 +1,34 @@
-"""
-domain/enriched_scorecard.py
-
-Modelo de domínio que representa um ResourceScorecard enriquecido com dados
-de ownership (Backstage) e custo (CAST AI). Sem dependência de banco de dados —
-tudo em memória, gerado sob demanda e opcionalmente cacheado no operador.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from src.domain.models import ResourceScorecard, ValidationPillar
-
+from src.domain.models import ResourceScorecard
 
 # ---------------------------------------------------------------------------
 # Perfil de ownership vindo do Backstage
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BackstageProfile:
-    """Metadados de ownership extraídos do catálogo Backstage."""
-
     # Identificação no catálogo
-    entity_ref: str                   # Ex: "component:default/payment-api"
+    entity_ref: str  # Ex: "component:default/payment-api"
     component_name: str
-    component_kind: str               # Component | Service | ...
+    component_kind: str  # Component | Service | ...
 
     # Ownership
-    owner: str                        # Ex: "group:squad-pagamentos"
-    squad: str                        # Extraído de owner (sem o prefixo "group:")
-    system: Optional[str] = None      # Ex: "checkout"
+    owner: str  # Ex: "group:squad-pagamentos"
+    squad: str  # Extraído de owner (sem o prefixo "group:")
+    system: Optional[str] = None  # Ex: "checkout"
 
     # Tier / criticidade (anotação customizada)
-    tier: Optional[str] = None        # Ex: "tier-1"
+    tier: Optional[str] = None  # Ex: "tier-1"
 
     # Configuração customizada injetada via anotações do catalog-info.yaml
-    slo_target_override: Optional[float] = None   # titlis.io/slo-target
-    scorecard_enabled: bool = True                # titlis.io/scorecard-enabled
+    slo_target_override: Optional[float] = None  # titlis.io/slo-target
+    scorecard_enabled: bool = True  # titlis.io/scorecard-enabled
 
     # Contatos
     tech_lead_email: Optional[str] = None
@@ -47,7 +38,6 @@ class BackstageProfile:
 
     @classmethod
     def unknown(cls, component_name: str) -> "BackstageProfile":
-        """Perfil fallback quando o Backstage não retorna dados."""
         return cls(
             entity_ref=f"component:unknown/{component_name}",
             component_name=component_name,
@@ -61,10 +51,9 @@ class BackstageProfile:
 # Perfil de custo vindo do CAST AI
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CostProfile:
-    """Dados de custo e eficiência extraídos do CAST AI."""
-
     # Custo mensal estimado (USD ou moeda configurada)
     monthly_cost_usd: float = 0.0
 
@@ -86,20 +75,22 @@ class CostProfile:
     # Indicadores derivados
     @property
     def cpu_efficiency_pct(self) -> Optional[float]:
-        """Percentual de utilização de CPU em relação ao que foi requestado."""
         if self.cpu_requested_millicores and self.cpu_used_avg_millicores:
-            return round((self.cpu_used_avg_millicores / self.cpu_requested_millicores) * 100, 1)
+            return round(
+                (self.cpu_used_avg_millicores / self.cpu_requested_millicores) * 100, 1
+            )
         return None
 
     @property
     def memory_efficiency_pct(self) -> Optional[float]:
         if self.memory_requested_mib and self.memory_used_avg_mib:
-            return round((self.memory_used_avg_mib / self.memory_requested_mib) * 100, 1)
+            return round(
+                (self.memory_used_avg_mib / self.memory_requested_mib) * 100, 1
+            )
         return None
 
     @property
     def waste_usd(self) -> float:
-        """Custo desperdiçado = potencial de saving ainda não realizado."""
         return round(self.potential_savings_usd, 2)
 
     # Timestamp da consulta
@@ -107,7 +98,6 @@ class CostProfile:
 
     @classmethod
     def unavailable(cls) -> "CostProfile":
-        """Perfil fallback quando o CAST AI não retorna dados."""
         return cls()
 
 
@@ -115,15 +105,9 @@ class CostProfile:
 # Scorecard enriquecido — modelo principal
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class EnrichedScorecard:
-    """
-    Scorecard de saúde enriquecido com dados de ownership e custo.
-
-    É gerado sob demanda pelo ScorecardEnricher e mantido em memória
-    no ScorecardsStore. Não requer persistência em banco de dados.
-    """
-
     # Scorecard original (calculado pelo ScorecardService)
     scorecard: ResourceScorecard
 
@@ -167,10 +151,6 @@ class EnrichedScorecard:
 
     @property
     def cost_per_score_point(self) -> Optional[float]:
-        """
-        USD por ponto de score. Quanto menor, mais eficiente.
-        Retorna None se o score for 0 (evita divisão por zero).
-        """
         if self.overall_score > 0 and self.cost.monthly_cost_usd > 0:
             return round(self.cost.monthly_cost_usd / self.overall_score, 2)
         return None
@@ -180,11 +160,15 @@ class EnrichedScorecard:
     # ---------------------------------------------------------------------------
 
     def to_slack_summary(self) -> Dict[str, Any]:
-        """Resumo compacto para mensagem Slack."""
-        score_emoji = "🟢" if self.overall_score >= 90 else (
-            "🟡" if self.overall_score >= 70 else (
-            "🟠" if self.overall_score >= 50 else "🔴"
-        ))
+        score_emoji = (
+            "🟢"
+            if self.overall_score >= 90
+            else (
+                "🟡"
+                if self.overall_score >= 70
+                else ("🟠" if self.overall_score >= 50 else "🔴")
+            )
+        )
 
         return {
             "service": self.service_name,
@@ -200,20 +184,22 @@ class EnrichedScorecard:
             "potential_savings_usd": f"${self.cost.waste_usd:.2f}",
             "cost_per_score_point": (
                 f"${self.cost_per_score_point:.2f}/pt"
-                if self.cost_per_score_point else "—"
+                if self.cost_per_score_point
+                else "—"
             ),
             "cpu_efficiency": (
                 f"{self.cost.cpu_efficiency_pct:.1f}%"
-                if self.cost.cpu_efficiency_pct else "—"
+                if self.cost.cpu_efficiency_pct
+                else "—"
             ),
             "memory_efficiency": (
                 f"{self.cost.memory_efficiency_pct:.1f}%"
-                if self.cost.memory_efficiency_pct else "—"
+                if self.cost.memory_efficiency_pct
+                else "—"
             ),
         }
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialização completa para API/logs."""
         return {
             "service": self.service_name,
             "namespace": self.namespace,

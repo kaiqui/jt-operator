@@ -14,15 +14,12 @@ DEPLOY_YAML_PATH = "manifests/kubernetes/main/deploy.yaml"
 
 
 class GitHubRepository(GitHubPort):
-    """Implementação concreta do GitHubPort usando a API REST do GitHub."""
-
     def __init__(self, client: GitHubAPIClient) -> None:
         self._client = client
 
     async def branch_exists(
         self, repo_owner: str, repo_name: str, branch_name: str
     ) -> bool:
-        """Verifica se a branch existe consultando o ref no GitHub."""
         try:
             await self._client.get(
                 f"/repos/{repo_owner}/{repo_name}/git/ref/heads/{branch_name}"
@@ -46,7 +43,6 @@ class GitHubRepository(GitHubPort):
         branch_name: str,
         base_branch: str,
     ) -> bool:
-        """Cria uma branch a partir do SHA mais recente da base_branch."""
         try:
             ref = await self._client.get(
                 f"/repos/{repo_owner}/{repo_name}/git/ref/heads/{base_branch}"
@@ -82,10 +78,6 @@ class GitHubRepository(GitHubPort):
         file_path: str,
         ref: str,
     ) -> Optional[str]:
-        """
-        Retorna o conteúdo decodificado (base64 → UTF-8) de um arquivo.
-        Retorna None se o arquivo não existir ou houver erro.
-        """
         try:
             response = await self._client.get(
                 f"/repos/{repo_owner}/{repo_name}/contents/{file_path}",
@@ -108,7 +100,9 @@ class GitHubRepository(GitHubPort):
             )
             return None
         except Exception:
-            logger.exception("Erro ao ler conteúdo do arquivo", extra={"path": file_path})
+            logger.exception(
+                "Erro ao ler conteúdo do arquivo", extra={"path": file_path}
+            )
             return None
 
     async def commit_files(
@@ -118,7 +112,6 @@ class GitHubRepository(GitHubPort):
         branch_name: str,
         files: List[RemediationFile],
     ) -> bool:
-        """Commita cada arquivo na branch usando a API de Contents do GitHub."""
         all_ok = True
 
         for f in files:
@@ -171,7 +164,6 @@ class GitHubRepository(GitHubPort):
         title: str,
         body: str,
     ) -> PullRequestResult:
-        """Cria um Pull Request de branch_name para base_branch."""
         response = await self._client.post(
             f"/repos/{repo_owner}/{repo_name}/pulls",
             {
@@ -209,12 +201,44 @@ class GitHubRepository(GitHubPort):
         resource_name: str,
         base_branch: str,
     ) -> Optional[PullRequestResult]:
-        """
-        Busca um PR aberto criado pelo titlis-operator para este recurso.
+        return await self._find_remediation_pr_by_state(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            namespace=namespace,
+            resource_name=resource_name,
+            base_branch=base_branch,
+            state="open",
+            only_merged=False,
+        )
 
-        Itera sobre PRs abertos com base em base_branch e filtra pelo prefixo
-        'fix/auto-remediation-{namespace}-{resource_name}-' no head branch.
-        """
+    async def find_merged_remediation_pr(
+        self,
+        repo_owner: str,
+        repo_name: str,
+        namespace: str,
+        resource_name: str,
+        base_branch: str,
+    ) -> Optional[PullRequestResult]:
+        return await self._find_remediation_pr_by_state(
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            namespace=namespace,
+            resource_name=resource_name,
+            base_branch=base_branch,
+            state="closed",
+            only_merged=True,
+        )
+
+    async def _find_remediation_pr_by_state(
+        self,
+        repo_owner: str,
+        repo_name: str,
+        namespace: str,
+        resource_name: str,
+        base_branch: str,
+        state: str,
+        only_merged: bool,
+    ) -> Optional[PullRequestResult]:
         safe_name = resource_name.replace("/", "-")
         branch_prefix = f"fix/auto-remediation-{namespace}-{safe_name}-"
 
@@ -224,7 +248,7 @@ class GitHubRepository(GitHubPort):
                 prs = await self._client.get_list(
                     f"/repos/{repo_owner}/{repo_name}/pulls",
                     params={
-                        "state": "open",
+                        "state": state,
                         "base": base_branch,
                         "per_page": 100,
                         "page": page,
@@ -236,24 +260,29 @@ class GitHubRepository(GitHubPort):
 
                 for pr_data in prs:
                     head_ref: str = pr_data.get("head", {}).get("ref", "")
-                    if head_ref.startswith(branch_prefix):
-                        pr = PullRequestResult(
-                            number=int(pr_data["number"]),
-                            title=str(pr_data["title"]),
-                            url=str(pr_data["html_url"]),
-                            branch=head_ref,
-                            base_branch=base_branch,
-                        )
-                        logger.info(
-                            "PR de remediacao existente encontrado",
-                            extra={
-                                "pr_number": pr.number,
-                                "pr_url": pr.url,
-                                "branch": head_ref,
-                                "resource": f"{namespace}/{resource_name}",
-                            },
-                        )
-                        return pr
+                    if not head_ref.startswith(branch_prefix):
+                        continue
+                    if only_merged and not pr_data.get("merged_at"):
+                        continue
+                    pr = PullRequestResult(
+                        number=int(pr_data["number"]),
+                        title=str(pr_data["title"]),
+                        url=str(pr_data["html_url"]),
+                        branch=head_ref,
+                        base_branch=base_branch,
+                    )
+                    logger.info(
+                        "PR de remediacao encontrado",
+                        extra={
+                            "pr_number": pr.number,
+                            "pr_url": pr.url,
+                            "branch": head_ref,
+                            "state": state,
+                            "merged": bool(pr_data.get("merged_at")),
+                            "resource": f"{namespace}/{resource_name}",
+                        },
+                    )
+                    return pr
 
                 if len(prs) < 100:
                     break
@@ -263,7 +292,7 @@ class GitHubRepository(GitHubPort):
 
         except Exception:
             logger.exception(
-                "Erro ao buscar PR de remediacao existente",
-                extra={"resource": f"{namespace}/{resource_name}"},
+                "Erro ao buscar PR de remediacao",
+                extra={"resource": f"{namespace}/{resource_name}", "state": state},
             )
             return None

@@ -7,7 +7,6 @@ from src.domain.models import ResourceScorecard
 
 
 class NamespaceNotificationBuffer:
-
     def __init__(self, digest_interval_minutes: int = 15) -> None:
         self._buffer: Dict[str, Dict[str, ResourceScorecard]] = {}
         self._last_sent: Dict[str, datetime] = {}

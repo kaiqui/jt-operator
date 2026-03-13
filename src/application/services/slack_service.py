@@ -4,7 +4,7 @@ from datetime import datetime
 from src.domain.slack_models import (
     SlackNotification,
     NotificationSeverity,
-    NotificationChannel
+    NotificationChannel,
 )
 from src.application.ports.slack_port import SlackNotifierPort
 from src.utils.json_logger import get_logger
@@ -13,13 +13,12 @@ logger = get_logger(__name__)
 
 
 class SlackNotificationService:
-
     def __init__(self, notifier: Optional[SlackNotifierPort] = None):
         self.notifier = notifier
         self._initialized = False
         logger.info(
             "SlackNotificationService inicializado",
-            extra={"has_notifier": notifier is not None}
+            extra={"has_notifier": notifier is not None},
         )
 
     async def initialize(self) -> bool:
@@ -52,7 +51,7 @@ class SlackNotificationService:
         channel: NotificationChannel = NotificationChannel.OPERATIONAL,
         namespace: Optional[str] = None,
         pod_name: Optional[str] = None,
-        **kwargs
+        **kwargs: Any,
     ) -> bool:
         if not self.is_enabled():
             logger.debug(f"Slack desabilitado, ignorando: {title}")
@@ -66,15 +65,15 @@ class SlackNotificationService:
                 channel=channel,
                 namespace=namespace,
                 pod_name=pod_name,
-                additional_fields=kwargs.get('additional_fields'),
-                custom_channel=kwargs.get('custom_channel'),
+                additional_fields=kwargs.get("additional_fields"),
+                custom_channel=kwargs.get("custom_channel"),
                 metadata={
-                    'timestamp': datetime.utcnow().isoformat(),
-                    **kwargs.get('metadata', {})
-                }
+                    "timestamp": datetime.utcnow().isoformat(),
+                    **kwargs.get("metadata", {}),
+                },
             )
 
-            success = await self.notifier.send_notification(notification)
+            success = await self.notifier.send_notification(notification)  # type: ignore[union-attr]
 
             if success:
                 logger.debug(
@@ -82,8 +81,8 @@ class SlackNotificationService:
                     extra={
                         "title": title[:50],
                         "severity": severity.value,
-                        "channel": channel.value
-                    }
+                        "channel": channel.value,
+                    },
                 )
             else:
                 logger.warning(
@@ -91,8 +90,8 @@ class SlackNotificationService:
                     extra={
                         "title": title[:50],
                         "severity": severity.value,
-                        "channel": channel.value
-                    }
+                        "channel": channel.value,
+                    },
                 )
 
             return success
@@ -108,7 +107,7 @@ class SlackNotificationService:
         reason: str,
         message: str,
         severity: Optional[NotificationSeverity] = None,
-        **kwargs
+        **kwargs: Any,
     ) -> bool:
         if not self.is_enabled():
             return False
@@ -119,10 +118,10 @@ class SlackNotificationService:
             else:
                 severity = NotificationSeverity.INFO
 
-        metadata = body.get('metadata', {})
-        name = metadata.get('name', 'Unknown')
-        namespace = metadata.get('namespace')
-        kind = body.get('kind', 'Resource')
+        metadata = body.get("metadata", {})
+        name = metadata.get("name", "Unknown")
+        namespace = metadata.get("namespace")
+        kind = body.get("kind", "Resource")
 
         title = f"{kind} {event_type.title()}: {name}"
         if namespace:
@@ -130,21 +129,17 @@ class SlackNotificationService:
 
         full_message = f"*Reason:* {reason}\n*Message:* {message}"
 
-        if metadata.get('uid'):
+        if metadata.get("uid"):
             full_message += f"\n*UID:* {metadata['uid']}"
 
         return await self.send_notification(
             title=title,
             message=full_message,
             severity=severity,
-            channel=kwargs.get('channel', NotificationChannel.OPERATIONAL),
+            channel=kwargs.get("channel", NotificationChannel.OPERATIONAL),
             namespace=namespace,
             pod_name=name,
-            metadata={
-                'event_type': event_type,
-                'kind': kind,
-                'reason': reason
-            }
+            metadata={"event_type": event_type, "kind": kind, "reason": reason},
         )
 
     async def send_health_check(self) -> bool:
@@ -153,7 +148,7 @@ class SlackNotificationService:
             message="Titlis Operator está UP e rodando! ✅",
             severity=NotificationSeverity.INFO,
             channel=NotificationChannel.DEBUG,
-            metadata={'type': 'health_check'}
+            metadata={"type": "health_check"},
         )
 
     async def test_connection(self) -> bool:
@@ -171,7 +166,7 @@ class SlackNotificationService:
                 message="Teste de conexão realizado pelo Titlis Operator Scorecard.",
                 severity=NotificationSeverity.INFO,
                 channel=NotificationChannel.DEBUG,
-                metadata={'type': 'connection_test', 'component': 'scorecard'}
+                metadata={"type": "connection_test", "component": "scorecard"},
             )
 
             if success:
@@ -182,8 +177,8 @@ class SlackNotificationService:
                     extra={
                         "service_enabled": self.is_enabled(),
                         "service_initialized": self._initialized,
-                        "notifier_available": self.notifier is not None
-                    }
+                        "notifier_available": self.notifier is not None,
+                    },
                 )
 
             return success
@@ -191,14 +186,14 @@ class SlackNotificationService:
         except Exception:
             logger.exception(
                 "Erro no teste de conexão Slack",
-                extra={"service_status": self.get_status()}
+                extra={"service_status": self.get_status()},
             )
             return False
 
     def get_status(self) -> Dict[str, Any]:
         return {
-            'enabled': self.is_enabled(),
-            'initialized': self._initialized,
-            'notifier_available': self.notifier is not None,
-            'service_name': 'SlackNotificationService'
+            "enabled": self.is_enabled(),
+            "initialized": self._initialized,
+            "notifier_available": self.notifier is not None,
+            "service_name": "SlackNotificationService",
         }

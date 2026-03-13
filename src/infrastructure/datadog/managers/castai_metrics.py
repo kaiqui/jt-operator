@@ -1,9 +1,3 @@
-"""
-infrastructure/datadog/managers/castai_metrics.py
-
-Envia métricas de health dos pods CAST AI para o Datadog via API HTTP.
-Não usa StatsD — usa a Metrics v2 API do Datadog diretamente.
-"""
 import time
 from typing import List, Optional
 
@@ -20,20 +14,6 @@ from src.settings import settings
 
 
 class CastAIMetricsManager:
-    """
-    Gerencia o envio de métricas de health dos serviços CAST AI ao Datadog.
-
-    Métricas enviadas:
-        castai.pod.health  (gauge)
-            1.0  → pod saudável (Running + Ready)
-            0.0  → pod ausente, não-Running ou não-Ready
-
-    Tags obrigatórias:
-        cluster_name  → identifica o cluster de origem
-        service       → 'castai-agent' | 'castai-cluster-controller'
-        namespace     → namespace onde o pod foi encontrado
-    """
-
     METRIC_NAME = "castai.pod.health"
 
     def __init__(
@@ -63,19 +43,6 @@ class CastAIMetricsManager:
         cluster_name: str,
         is_healthy: bool,
     ) -> bool:
-        """
-        Envia uma gauge para o Datadog indicando o estado de health de um
-        serviço CAST AI.
-
-        Args:
-            service:      Nome do serviço (ex: 'castai-agent').
-            namespace:    Namespace Kubernetes onde o pod está.
-            cluster_name: Nome do cluster para a tag cluster_name.
-            is_healthy:   True se o pod está Running + Ready; False caso contrário.
-
-        Returns:
-            True se o envio foi aceito pela API, False em caso de erro.
-        """
         value = 1.0 if is_healthy else 0.0
         tags = [
             f"cluster_name:{cluster_name}",
@@ -143,12 +110,6 @@ class CastAIMetricsManager:
             return False
 
     def send_all(self, results: List[dict]) -> None:
-        """
-        Envia uma lista de resultados de health em lote.
-
-        Cada item em `results` deve ter as chaves:
-            service, namespace, cluster_name, is_healthy
-        """
         for result in results:
             self.send_pod_health(
                 service=result["service"],

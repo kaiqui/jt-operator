@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import kopf
 import logging
-import sys
 from typing import Any
 
 from src.bootstrap.dependencies import init_logging
+
 init_logging()
 
 from src.settings import settings
@@ -15,7 +15,7 @@ from src.bootstrap.dependencies import (
     get_slack_service,
     initialize_slack_service,
     shutdown_slack_service,
-    get_scorecard_service
+    get_scorecard_service,
 )
 
 logger = logging.getLogger("titlis")
@@ -42,13 +42,16 @@ def startup(settings_: "kopf.OperatorSettings | None" = None, **kwargs: Any) -> 
 
         if settings.enable_scorecard_controller:
             scorecard_service = get_scorecard_service()
-            logger.info(
-                "Scorecard service configurado",
-                extra={
-                    "rules_count": len([r for r in scorecard_service.config.rules if r.enabled]),
-                    "notification_batch": scorecard_service.config.batch_notifications
-                }
-            )
+            if scorecard_service:
+                logger.info(
+                    "Scorecard service configurado",
+                    extra={
+                        "rules_count": len(
+                            [r for r in scorecard_service.config.rules if r.enabled]
+                        ),
+                        "notification_batch": scorecard_service.config.batch_notifications,
+                    },
+                )
 
         slack_service = get_slack_service()
         if slack_service:
@@ -57,12 +60,12 @@ def startup(settings_: "kopf.OperatorSettings | None" = None, **kwargs: Any) -> 
                 extra={
                     "enabled": settings.slack.enabled,
                     "default_channel": settings.slack.default_channel,
-                }
+                },
             )
         elif settings.slack.enabled:
             logger.warning(
                 "Slack habilitado mas serviço não disponível",
-                extra={"reason": "Verifique as credenciais"}
+                extra={"reason": "Verifique as credenciais"},
             )
 
         logger.info("Titlis Operator iniciado com sucesso")

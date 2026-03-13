@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-config" (include "castai-monitor.fullname" .) | quote }}
+  labels:
+    app.kubernetes.io/name: {{ include "castai-monitor.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  # Operator behavior
+  RECONCILE_INTERVAL_SECONDS: "{{ default 300 .Values.operator.reconciliation.intervalSeconds }}"
+  DEBOUNCE_SECONDS: "{{ default 30 .Values.operator.reconciliation.debounceSeconds }}"
+  ENABLE_LEADER_ELECTION: "{{ default true .Values.operator.leaderElection.enabled }}"
+  LEADER_ELECTION_NAMESPACE: "{{ default "titlis" .Values.operator.leaderElection.namespace }}"
+
+  # Kubernetes
+  KUBERNETES_NAMESPACE: "{{ default "titlis-system" .Values.kubernetes.namespace }}"
+  SERVICE_ACCOUNT_NAME: "{{ default "titlis-operator" .Values.kubernetes.serviceAccountName }}"
+
+  # Logging
+  LOG_LEVEL: "{{ default "INFO" .Values.logging.level }}"
+  LOG_FORMAT: "{{ default "json" .Values.logging.format }}"
+
+  # Observability
+  METRICS_ENABLED: "{{ default true .Values.observability.metricsEnabled }}"
+  TRACING_ENABLED: "{{ default false .Values.observability.tracingEnabled }}"
+
+  # Controllers — todos desabilitados neste chart
+  ENABLE_SCORECARD_CONTROLLER: "false"
+  ENABLE_SLO_CONTROLLER: "false"
+  ENABLE_AUTO_REMEDIATION: "false"
+  ENABLE_BACKSTAGE_ENRICHMENT: "false"
+  ENABLE_CASTAI_COST_ENRICHMENT: "false"
+  GITHUB_ENABLED: "false"
+  SLACK_ENABLED: "false"
+
+  # CAST AI Monitor — único módulo ativo
+  ENABLE_CASTAI_MONITOR: "{{ default true .Values.castai.monitorEnabled }}"
+  CASTAI_MONITOR_NAMESPACE: "{{ default "castai-agent" .Values.castai.monitorNamespace }}"
+  CASTAI_MONITOR_INTERVAL_SECONDS: "{{ default 60 .Values.castai.monitorIntervalSeconds }}"
+  CASTAI_CLUSTER_NAME: "{{ default "develop" .Values.castai.clusterName }}"
+  CASTAI_COST_CACHE_TTL_SECONDS: "{{ default 300 .Values.castai.costCacheTtlSeconds }}"
+
+  # Datadog
+  DD_SITE: "{{ default "datadoghq.com" .Values.datadog.site }}"

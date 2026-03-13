@@ -3,33 +3,71 @@ from typing import Optional
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class SlackSettings(BaseSettings):
     enabled: bool = Field(default=True, validation_alias="SLACK_ENABLED")
-    webhook_url: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_WEBHOOK_URL")
-    client_id: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_CLIENT_ID")
-    client_secret: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_CLIENT_SECRET")
-    signing_secret: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_SIGNING_SECRET")
-    verification_token: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_VERIFICATION_TOKEN")
-    bot_token: Optional[SecretStr] = Field(default=None, validation_alias="SLACK_BOT_TOKEN")
-    default_channel: str = Field(default="#titlis-notifications", validation_alias="SLACK_DEFAULT_CHANNEL")
-    secret_name: str = Field(default="titlis-slack-keys", validation_alias="SLACK_SECRET_NAME")
-    rate_limit_per_minute: int = Field(default=60, validation_alias="SLACK_RATE_LIMIT_PER_MINUTE")
-    rate_limit_per_hour: int = Field(default=360, validation_alias="SLACK_RATE_LIMIT_PER_HOUR")
-    timeout_seconds: float = Field(default=10.0, validation_alias="SLACK_TIMEOUT_SECONDS")
+    webhook_url: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_WEBHOOK_URL"
+    )
+    client_id: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_CLIENT_ID"
+    )
+    client_secret: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_CLIENT_SECRET"
+    )
+    signing_secret: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_SIGNING_SECRET"
+    )
+    verification_token: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_VERIFICATION_TOKEN"
+    )
+    bot_token: Optional[SecretStr] = Field(
+        default=None, validation_alias="SLACK_BOT_TOKEN"
+    )
+    default_channel: str = Field(
+        default="#titlis-notifications", validation_alias="SLACK_DEFAULT_CHANNEL"
+    )
+    secret_name: str = Field(
+        default="titlis-slack-keys", validation_alias="SLACK_SECRET_NAME"
+    )
+    rate_limit_per_minute: int = Field(
+        default=60, validation_alias="SLACK_RATE_LIMIT_PER_MINUTE"
+    )
+    rate_limit_per_hour: int = Field(
+        default=360, validation_alias="SLACK_RATE_LIMIT_PER_HOUR"
+    )
+    timeout_seconds: float = Field(
+        default=10.0, validation_alias="SLACK_TIMEOUT_SECONDS"
+    )
     max_retries: int = Field(default=3, validation_alias="SLACK_MAX_RETRIES")
-    enabled_severities: str = Field(default="info,warning,error,critical", validation_alias="SLACK_ENABLED_SEVERITIES")
-    enabled_channels: str = Field(default="operational,alerts", validation_alias="SLACK_ENABLED_CHANNELS")
-    message_title: str = Field(default="Kopf Operator Notification", validation_alias="SLACK_MESSAGE_TITLE")
-    include_timestamp: bool = Field(default=True, validation_alias="SLACK_INCLUDE_TIMESTAMP")
-    include_cluster_info: bool = Field(default=True, validation_alias="SLACK_INCLUDE_CLUSTER_INFO")
-    include_namespace: bool = Field(default=True, validation_alias="SLACK_INCLUDE_NAMESPACE")
-    max_message_length: int = Field(default=3000, validation_alias="SLACK_MAX_MESSAGE_LENGTH")
-    config_path: Optional[str] = Field(default=None, validation_alias="SLACK_CONFIG_PATH")
+    enabled_severities: str = Field(
+        default="info,warning,error,critical",
+        validation_alias="SLACK_ENABLED_SEVERITIES",
+    )
+    enabled_channels: str = Field(
+        default="operational,alerts", validation_alias="SLACK_ENABLED_CHANNELS"
+    )
+    message_title: str = Field(
+        default="Kopf Operator Notification", validation_alias="SLACK_MESSAGE_TITLE"
+    )
+    include_timestamp: bool = Field(
+        default=True, validation_alias="SLACK_INCLUDE_TIMESTAMP"
+    )
+    include_cluster_info: bool = Field(
+        default=True, validation_alias="SLACK_INCLUDE_CLUSTER_INFO"
+    )
+    include_namespace: bool = Field(
+        default=True, validation_alias="SLACK_INCLUDE_NAMESPACE"
+    )
+    max_message_length: int = Field(
+        default=3000, validation_alias="SLACK_MAX_MESSAGE_LENGTH"
+    )
+    config_path: Optional[str] = Field(
+        default=None, validation_alias="SLACK_CONFIG_PATH"
+    )
 
     model_config = SettingsConfigDict(
-        env_prefix="SLACK_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="SLACK_", case_sensitive=False, extra="ignore"
     )
 
 
@@ -74,6 +112,53 @@ class RemediationSettings(BaseSettings):
         default=80, validation_alias="REMEDIATION_HPA_MEMORY_UTILIZATION"
     )
 
+    # Feature flags para ações de remediação
+    enable_remediation_resources: bool = Field(
+        default=True, validation_alias="ENABLE_REMEDIATION_RESOURCES"
+    )
+    enable_remediation_hpa: bool = Field(
+        default=True, validation_alias="ENABLE_REMEDIATION_HPA"
+    )
+
+    # Perfis de HPA
+    hpa_profile_default: str = Field(
+        default="light", validation_alias="REMEDIATION_HPA_PROFILE_DEFAULT"
+    )
+    hpa_profile_critical: str = Field(
+        default="rigid", validation_alias="REMEDIATION_HPA_PROFILE_CRITICAL"
+    )
+
+    # Detecção de criticidade via Datadog
+    hpa_critical_threshold_rpm: int = Field(
+        default=100000, validation_alias="REMEDIATION_HPA_CRITICAL_THRESHOLD_RPM"
+    )
+
+    # Behavior de scaleUp
+    hpa_behavior_scale_up_stabilization: int = Field(
+        default=0, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_UP_STABILIZATION"
+    )
+    hpa_behavior_scale_up_pods: int = Field(
+        default=4, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_UP_PODS"
+    )
+    hpa_behavior_scale_up_percent: int = Field(
+        default=100, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_UP_PERCENT"
+    )
+    hpa_behavior_scale_up_period: int = Field(
+        default=15, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_UP_PERIOD"
+    )
+
+    # Behavior de scaleDown
+    hpa_behavior_scale_down_stabilization: int = Field(
+        default=300,
+        validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_DOWN_STABILIZATION",
+    )
+    hpa_behavior_scale_down_pods: int = Field(
+        default=1, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_DOWN_PODS"
+    )
+    hpa_behavior_scale_down_period: int = Field(
+        default=60, validation_alias="REMEDIATION_HPA_BEHAVIOR_SCALE_DOWN_PERIOD"
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="REMEDIATION_",
         case_sensitive=False,
@@ -86,18 +171,30 @@ class Settings(BaseSettings):
     github: GitHubSettings = Field(default_factory=GitHubSettings)
     remediation: RemediationSettings = Field(default_factory=RemediationSettings)
 
-    kubernetes_namespace: str = Field(default="titlis-system", validation_alias="KUBERNETES_NAMESPACE")
-    service_account_name: str = Field(default="titlis-operator", validation_alias="SERVICE_ACCOUNT_NAME")
+    kubernetes_namespace: str = Field(
+        default="titlis-system", validation_alias="KUBERNETES_NAMESPACE"
+    )
+    service_account_name: str = Field(
+        default="titlis-operator", validation_alias="SERVICE_ACCOUNT_NAME"
+    )
 
     datadog_api_key: Optional[str] = Field(default=None, validation_alias="DD_API_KEY")
     datadog_app_key: Optional[str] = Field(default=None, validation_alias="DD_APP_KEY")
     datadog_site: str = Field(default="datadoghq.com", validation_alias="DD_SITE")
-    datadog_secret_name: str = Field(default="titlis-datadog-keys", validation_alias="DD_SECRET_NAME")
+    datadog_secret_name: str = Field(
+        default="titlis-datadog-keys", validation_alias="DD_SECRET_NAME"
+    )
 
-    reconcile_interval_seconds: int = Field(default=300, validation_alias="RECONCILE_INTERVAL_SECONDS")
+    reconcile_interval_seconds: int = Field(
+        default=300, validation_alias="RECONCILE_INTERVAL_SECONDS"
+    )
     debounce_seconds: int = Field(default=30, validation_alias="DEBOUNCE_SECONDS")
-    enable_leader_election: bool = Field(default=True, validation_alias="ENABLE_LEADER_ELECTION")
-    leader_election_namespace: str = Field(default="titlis", validation_alias="LEADER_ELECTION_NAMESPACE")
+    enable_leader_election: bool = Field(
+        default=True, validation_alias="ENABLE_LEADER_ELECTION"
+    )
+    leader_election_namespace: str = Field(
+        default="titlis", validation_alias="LEADER_ELECTION_NAMESPACE"
+    )
 
     log_level: str = Field(default="DEBUG", validation_alias="LOG_LEVEL")
     log_format: str = Field(default="json", validation_alias="LOG_FORMAT")
@@ -105,34 +202,57 @@ class Settings(BaseSettings):
     metrics_enabled: bool = Field(default=True, validation_alias="METRICS_ENABLED")
     tracing_enabled: bool = Field(default=False, validation_alias="TRACING_ENABLED")
 
-    enable_scorecard_controller: bool = Field(default=True, validation_alias="ENABLE_SCORECARD_CONTROLLER")
-    enable_slo_controller: bool = Field(default=True, validation_alias="ENABLE_SLO_CONTROLLER")
+    enable_scorecard_controller: bool = Field(
+        default=True, validation_alias="ENABLE_SCORECARD_CONTROLLER"
+    )
+    enable_slo_controller: bool = Field(
+        default=True, validation_alias="ENABLE_SLO_CONTROLLER"
+    )
 
-    enable_castai_monitor: bool = Field(default=False, validation_alias="ENABLE_CASTAI_MONITOR")
-    castai_monitor_namespace: str = Field(default="castai-agent", validation_alias="CASTAI_MONITOR_NAMESPACE")
-    castai_monitor_interval_seconds: int = Field(default=60, validation_alias="CASTAI_MONITOR_INTERVAL_SECONDS")
-    castai_cluster_name: str = Field(default="develop", validation_alias="CASTAI_CLUSTER_NAME")
+    enable_castai_monitor: bool = Field(
+        default=False, validation_alias="ENABLE_CASTAI_MONITOR"
+    )
+    castai_monitor_namespace: str = Field(
+        default="castai-agent", validation_alias="CASTAI_MONITOR_NAMESPACE"
+    )
+    castai_monitor_interval_seconds: int = Field(
+        default=60, validation_alias="CASTAI_MONITOR_INTERVAL_SECONDS"
+    )
+    castai_cluster_name: str = Field(
+        default="develop", validation_alias="CASTAI_CLUSTER_NAME"
+    )
 
     backstage_url: Optional[str] = Field(default=None, validation_alias="BACKSTAGE_URL")
-    backstage_token: Optional[str] = Field(default=None, validation_alias="BACKSTAGE_TOKEN")
-    backstage_cache_ttl_seconds: int = Field(default=300, validation_alias="BACKSTAGE_CACHE_TTL_SECONDS")
+    backstage_token: Optional[str] = Field(
+        default=None, validation_alias="BACKSTAGE_TOKEN"
+    )
+    backstage_cache_ttl_seconds: int = Field(
+        default=300, validation_alias="BACKSTAGE_CACHE_TTL_SECONDS"
+    )
 
-    castai_api_key: Optional[str] = Field(default=None, validation_alias="CASTAI_API_KEY")
-    castai_cluster_id: Optional[str] = Field(default=None, validation_alias="CASTAI_CLUSTER_ID")
-    castai_cost_cache_ttl_seconds: int = Field(default=300, validation_alias="CASTAI_COST_CACHE_TTL_SECONDS")
+    castai_api_key: Optional[str] = Field(
+        default=None, validation_alias="CASTAI_API_KEY"
+    )
+    castai_cluster_id: Optional[str] = Field(
+        default=None, validation_alias="CASTAI_CLUSTER_ID"
+    )
+    castai_cost_cache_ttl_seconds: int = Field(
+        default=300, validation_alias="CASTAI_COST_CACHE_TTL_SECONDS"
+    )
 
-    enable_backstage_enrichment: bool = Field(default=False, validation_alias="ENABLE_BACKSTAGE_ENRICHMENT")
-    enable_castai_cost_enrichment: bool = Field(default=False, validation_alias="ENABLE_CASTAI_COST_ENRICHMENT")
+    enable_backstage_enrichment: bool = Field(
+        default=False, validation_alias="ENABLE_BACKSTAGE_ENRICHMENT"
+    )
+    enable_castai_cost_enrichment: bool = Field(
+        default=False, validation_alias="ENABLE_CASTAI_COST_ENRICHMENT"
+    )
 
     enable_auto_remediation: bool = Field(
         default=True, validation_alias="ENABLE_AUTO_REMEDIATION"
     )
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
 

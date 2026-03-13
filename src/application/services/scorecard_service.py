@@ -1,14 +1,20 @@
 import re
 import yaml
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 from kubernetes import client
 from src.domain.models import (
-    ResourceScorecard, PillarScore, ValidationResult, ValidationRule,
-    ValidationPillar, ValidationSeverity, ValidationRuleType,
-    ScorecardConfig, KubernetesResource
+    ResourceScorecard,
+    PillarScore,
+    ValidationResult,
+    ValidationRule,
+    ValidationPillar,
+    ValidationSeverity,
+    ValidationRuleType,
+    ScorecardConfig,
+    CriticalityLevel,
 )
 from src.infrastructure.kubernetes.client import get_k8s_apis
 from src.utils.json_logger import get_logger
@@ -18,14 +24,15 @@ logger = get_logger(__name__)
 
 
 class ScorecardService:
-
     def __init__(self, config_path: Optional[str] = None):
         self.logger = get_logger(self.__class__.__name__)
         self.config = self._load_config(config_path)
         self.core, self.apps, self.custom = get_k8s_apis()
         self.autoscaling_v2 = client.AutoscalingV2Api()
         self.networking_v1 = client.NetworkingV1Api()
-        self.state_store = KubeStateStore(namespace="titlis-system", name="scorecard-state")
+        self.state_store = KubeStateStore(
+            namespace="titlis-system", name="scorecard-state"
+        )
         self._validation_cache: Dict[str, ResourceScorecard] = {}
         self._cache_ttl = timedelta(minutes=5)
         self.logger.info(
@@ -33,8 +40,8 @@ class ScorecardService:
             extra={
                 "rules_count": len(self.config.rules),
                 "enabled_rules": len([r for r in self.config.rules if r.enabled]),
-                "pilars": list(set(r.pillar for r in self.config.rules if r.enabled))
-            }
+                "pilars": list(set(r.pillar for r in self.config.rules if r.enabled)),
+            },
         )
 
     def _load_config(self, config_path: Optional[str]) -> ScorecardConfig:
@@ -42,7 +49,7 @@ class ScorecardService:
 
         if config_path:
             try:
-                with open(config_path, 'r') as f:
+                with open(config_path, "r") as f:
                     config_data = yaml.safe_load(f)
                     return self._parse_config(config_data, default_rules)
             except Exception:
@@ -62,7 +69,7 @@ class ScorecardService:
                 severity=ValidationSeverity.ERROR,
                 weight=10.0,
                 remediation="Adicione livenessProbe para detectar containers travados",
-                documentation_url="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+                documentation_url="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
             ),
             ValidationRule(
                 id="RES-002",
@@ -74,7 +81,7 @@ class ScorecardService:
                 severity=ValidationSeverity.ERROR,
                 weight=10.0,
                 remediation="Adicione readinessProbe para controle de tráfego",
-                documentation_url="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+                documentation_url="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/",
             ),
             ValidationRule(
                 id="RES-003",
@@ -85,7 +92,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.ERROR,
                 weight=8.0,
-                remediation="Defina requests.cpu para planejamento de recursos"
+                remediation="Defina requests.cpu para planejamento de recursos",
             ),
             ValidationRule(
                 id="RES-004",
@@ -96,7 +103,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.WARNING,
                 weight=5.0,
-                remediation="Defina limits.cpu para evitar consumo excessivo"
+                remediation="Defina limits.cpu para evitar consumo excessivo",
             ),
             ValidationRule(
                 id="RES-005",
@@ -107,7 +114,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.ERROR,
                 weight=8.0,
-                remediation="Defina requests.memory para planejamento de recursos"
+                remediation="Defina requests.memory para planejamento de recursos",
             ),
             ValidationRule(
                 id="RES-006",
@@ -118,7 +125,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.WARNING,
                 weight=5.0,
-                remediation="Defina limits.memory para evitar OOM kills"
+                remediation="Defina limits.memory para evitar OOM kills",
             ),
             ValidationRule(
                 id="RES-007",
@@ -130,7 +137,7 @@ class ScorecardService:
                 severity=ValidationSeverity.WARNING,
                 weight=7.0,
                 applies_to=["Deployment"],
-                remediation="Configure HPA para auto-scaling baseado em demanda"
+                remediation="Configure HPA para auto-scaling baseado em demanda",
             ),
             ValidationRule(
                 id="RES-008",
@@ -142,7 +149,7 @@ class ScorecardService:
                 severity=ValidationSeverity.WARNING,
                 weight=5.0,
                 applies_to=["Deployment"],
-                remediation="Adicione métricas de CPU ou memória ao HPA"
+                remediation="Adicione métricas de CPU ou memória ao HPA",
             ),
             ValidationRule(
                 id="RES-009",
@@ -153,7 +160,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.INFO,
                 weight=3.0,
-                remediation="Configure terminationGracePeriodSeconds para shutdown gracioso"
+                remediation="Configure terminationGracePeriodSeconds para shutdown gracioso",
             ),
             ValidationRule(
                 id="RES-010",
@@ -164,7 +171,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.ERROR,
                 weight=10.0,
-                remediation="Configure securityContext.runAsNonRoot: true"
+                remediation="Configure securityContext.runAsNonRoot: true",
             ),
             ValidationRule(
                 id="RES-011",
@@ -175,7 +182,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.WARNING,
                 weight=5.0,
-                remediation="Configure securityContext no nível do pod"
+                remediation="Configure securityContext no nível do pod",
             ),
             ValidationRule(
                 id="RES-012",
@@ -187,7 +194,7 @@ class ScorecardService:
                 severity=ValidationSeverity.WARNING,
                 weight=7.0,
                 applies_to=["Deployment", "StatefulSet"],
-                remediation="Crie NetworkPolicy para limitar tráfego de rede"
+                remediation="Crie NetworkPolicy para limitar tráfego de rede",
             ),
             ValidationRule(
                 id="RES-013",
@@ -200,7 +207,7 @@ class ScorecardService:
                 weight=6.0,
                 min_value=2,
                 applies_to=["Deployment"],
-                remediation="Aumente replicas para pelo menos 2 para alta disponibilidade"
+                remediation="Aumente replicas para pelo menos 2 para alta disponibilidade",
             ),
             ValidationRule(
                 id="RES-014",
@@ -212,7 +219,7 @@ class ScorecardService:
                 severity=ValidationSeverity.WARNING,
                 weight=4.0,
                 applies_to=["Deployment"],
-                remediation="Configure strategy.type: RollingUpdate com maxUnavailable/maxSurge"
+                remediation="Configure strategy.type: RollingUpdate com maxUnavailable/maxSurge",
             ),
             ValidationRule(
                 id="SEC-001",
@@ -224,7 +231,7 @@ class ScorecardService:
                 severity=ValidationSeverity.ERROR,
                 weight=9.0,
                 regex_pattern=r"^(?!.*:latest$).+$",
-                remediation="Use tags versionadas (ex: v1.2.3) ao invés de 'latest'"
+                remediation="Use tags versionadas (ex: v1.2.3) ao invés de 'latest'",
             ),
             ValidationRule(
                 id="SEC-002",
@@ -235,7 +242,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.WARNING,
                 weight=6.0,
-                remediation="Configure securityContext.readOnlyRootFilesystem: true"
+                remediation="Configure securityContext.readOnlyRootFilesystem: true",
             ),
             ValidationRule(
                 id="SEC-003",
@@ -246,7 +253,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.ERROR,
                 weight=8.0,
-                remediation="Configure securityContext.allowPrivilegeEscalation: false"
+                remediation="Configure securityContext.allowPrivilegeEscalation: false",
             ),
             ValidationRule(
                 id="SEC-004",
@@ -257,7 +264,7 @@ class ScorecardService:
                 source="K8s API",
                 severity=ValidationSeverity.WARNING,
                 weight=5.0,
-                remediation="Remova capabilities desnecessárias: securityContext.capabilities.drop: ['ALL']"
+                remediation="Remova capabilities desnecessárias: securityContext.capabilities.drop: ['ALL']",
             ),
             ValidationRule(
                 id="PERF-001",
@@ -269,7 +276,7 @@ class ScorecardService:
                 severity=ValidationSeverity.WARNING,
                 weight=4.0,
                 max_value=3.0,
-                remediation="Ajuste limites para serem mais próximos dos requests"
+                remediation="Ajuste limites para serem mais próximos dos requests",
             ),
             ValidationRule(
                 id="PERF-002",
@@ -282,11 +289,107 @@ class ScorecardService:
                 weight=3.0,
                 min_value=50.0,
                 max_value=90.0,
-                remediation="Ajuste target para faixa ideal (50-90%)"
+                remediation="Ajuste target para faixa ideal (50-90%)",
+            ),
+            # ── Regras avançadas de HPA (Perfil Leve) ────────────────────────────
+            ValidationRule(
+                id="RES-016",
+                pillar=ValidationPillar.RESILIENCE,
+                name="HPA MinReplicas >= 2",
+                description="HPA deve ter minReplicas >= 2 para evitar cold start",
+                rule_type=ValidationRuleType.NUMERIC,
+                source="K8s API",
+                severity=ValidationSeverity.WARNING,
+                weight=5.0,
+                min_value=2.0,
+                applies_to=["Deployment"],
+                remediation="Configure HPA minReplicas >= 2",
+            ),
+            ValidationRule(
+                id="PERF-003",
+                pillar=ValidationPillar.PERFORMANCE,
+                name="HPA CPU Target <= 70%",
+                description="HPA CPU utilization target deve ser <= 70% para escalar antes de saturar",
+                rule_type=ValidationRuleType.NUMERIC,
+                source="K8s API",
+                severity=ValidationSeverity.INFO,
+                weight=3.0,
+                max_value=70.0,
+                applies_to=["Deployment"],
+                remediation="Reduza o target de CPU do HPA para <= 70%",
+            ),
+            # ── Regras avançadas de HPA (Perfil Rígido — apenas apps críticas) ──
+            ValidationRule(
+                id="RES-017",
+                pillar=ValidationPillar.RESILIENCE,
+                name="HPA ScaleUp Stabilization == 0s",
+                description="HPA behavior.scaleUp.stabilizationWindowSeconds deve ser 0 para resposta imediata",
+                rule_type=ValidationRuleType.NUMERIC,
+                source="K8s API",
+                severity=ValidationSeverity.WARNING,
+                weight=4.0,
+                max_value=0.0,
+                applies_to=["Deployment"],
+                remediation="Configure behavior.scaleUp.stabilizationWindowSeconds: 0",
+                criticality_profile="rigid",
+            ),
+            ValidationRule(
+                id="RES-018",
+                pillar=ValidationPillar.RESILIENCE,
+                name="HPA ScaleDown Stabilization >= 300s",
+                description="HPA behavior.scaleDown.stabilizationWindowSeconds deve ser >= 300 para evitar flapping",
+                rule_type=ValidationRuleType.NUMERIC,
+                source="K8s API",
+                severity=ValidationSeverity.WARNING,
+                weight=4.0,
+                min_value=300.0,
+                applies_to=["Deployment"],
+                remediation="Configure behavior.scaleDown.stabilizationWindowSeconds: 300",
+                criticality_profile="rigid",
+            ),
+            ValidationRule(
+                id="RES-019",
+                pillar=ValidationPillar.RESILIENCE,
+                name="HPA com Políticas Explícitas",
+                description="HPA deve ter políticas de scaleUp e scaleDown explícitas",
+                rule_type=ValidationRuleType.BOOLEAN,
+                source="K8s API",
+                severity=ValidationSeverity.WARNING,
+                weight=4.0,
+                applies_to=["Deployment"],
+                remediation="Configure behavior.scaleUp.policies e behavior.scaleDown.policies",
+                criticality_profile="rigid",
+            ),
+            # ── Observabilidade ───────────────────────────────────────────────────
+            ValidationRule(
+                id="OPS-001",
+                pillar=ValidationPillar.OPERATIONAL,
+                name="Instrumentação Datadog",
+                description=(
+                    "Deployment deve ter labels e annotations de instrumentação Datadog: "
+                    "tags.datadoghq.com/{env,service,version} em metadata e spec.template, "
+                    "admission.datadoghq.com/enabled=true no pod template e "
+                    "admission.datadoghq.com/python-lib.version > 3.17.2"
+                ),
+                rule_type=ValidationRuleType.BOOLEAN,
+                source="K8s API",
+                severity=ValidationSeverity.WARNING,
+                weight=8.0,
+                applies_to=["Deployment"],
+                remediation=(
+                    "Adicione labels tags.datadoghq.com/{env,service,version} em "
+                    "metadata.labels e spec.template.metadata.labels, "
+                    "admission.datadoghq.com/enabled=true em spec.template.metadata.labels e "
+                    "admission.datadoghq.com/python-lib.version > v3.17.2 em "
+                    "spec.template.metadata.annotations"
+                ),
+                documentation_url="https://docs.datadoghq.com/tracing/trace_collection/library_injection_local/",
             ),
         ]
 
-    def _parse_config(self, config_data: Dict[str, Any], default_rules: List[ValidationRule]) -> ScorecardConfig:
+    def _parse_config(
+        self, config_data: Dict[str, Any], default_rules: List[ValidationRule]
+    ) -> ScorecardConfig:
         rules = []
         rule_map = {r.id: r for r in default_rules}
 
@@ -309,7 +412,9 @@ class ScorecardService:
                         description=rule_data.get("description", ""),
                         rule_type=ValidationRuleType(rule_data["type"]),
                         source=rule_data.get("source", "Custom"),
-                        severity=ValidationSeverity(rule_data.get("severity", "warning")),
+                        severity=ValidationSeverity(
+                            rule_data.get("severity", "warning")
+                        ),
                         weight=rule_data.get("weight", 1.0),
                         enabled=rule_data.get("enabled", True),
                         applies_to=rule_data.get("applies_to", ["Deployment"]),
@@ -319,7 +424,7 @@ class ScorecardService:
                         allowed_values=rule_data.get("allowed_values"),
                         regex_pattern=rule_data.get("regex_pattern"),
                         remediation=rule_data.get("remediation"),
-                        documentation_url=rule_data.get("documentation_url")
+                        documentation_url=rule_data.get("documentation_url"),
                     )
                     rule_map[rule_id] = rule
 
@@ -344,7 +449,9 @@ class ScorecardService:
 
         return config
 
-    def evaluate_resource(self, namespace: str, name: str, kind: str = "Deployment") -> ResourceScorecard:
+    def evaluate_resource(
+        self, namespace: str, name: str, kind: str = "Deployment"
+    ) -> ResourceScorecard:
         cache_key = f"{namespace}/{name}/{kind}"
         if cache_key in self._validation_cache:
             cached = self._validation_cache[cache_key]
@@ -356,9 +463,17 @@ class ScorecardService:
         if not resource:
             raise ValueError(f"Recurso {namespace}/{name}/{kind} não encontrado")
 
+        criticality_level = self._detect_criticality(resource)
+
         applicable_rules = [
-            r for r in self.config.rules
-            if r.enabled and kind in r.applies_to
+            r
+            for r in self.config.rules
+            if r.enabled
+            and kind in r.applies_to
+            and (
+                r.criticality_profile is None
+                or r.criticality_profile == criticality_level.value
+            )
         ]
 
         validation_results = []
@@ -369,9 +484,21 @@ class ScorecardService:
         pillar_scores = self._calculate_pillar_scores(validation_results)
         overall_score = self._calculate_overall_score(pillar_scores)
 
-        critical_issues = sum(1 for r in validation_results if not r.passed and r.severity == ValidationSeverity.CRITICAL)
-        error_issues = sum(1 for r in validation_results if not r.passed and r.severity == ValidationSeverity.ERROR)
-        warning_issues = sum(1 for r in validation_results if not r.passed and r.severity == ValidationSeverity.WARNING)
+        critical_issues = sum(
+            1
+            for r in validation_results
+            if not r.passed and r.severity == ValidationSeverity.CRITICAL
+        )
+        error_issues = sum(
+            1
+            for r in validation_results
+            if not r.passed and r.severity == ValidationSeverity.ERROR
+        )
+        warning_issues = sum(
+            1
+            for r in validation_results
+            if not r.passed and r.severity == ValidationSeverity.WARNING
+        )
         passed_checks = sum(1 for r in validation_results if r.passed)
         total_checks = len(validation_results)
 
@@ -385,7 +512,8 @@ class ScorecardService:
             error_issues=error_issues,
             warning_issues=warning_issues,
             passed_checks=passed_checks,
-            total_checks=total_checks
+            total_checks=total_checks,
+            criticality_level=criticality_level.value,
         )
 
         self._validation_cache[cache_key] = scorecard
@@ -395,39 +523,50 @@ class ScorecardService:
 
         return scorecard
 
-    def _get_resource(self, namespace: str, name: str, kind: str) -> Optional[Dict[str, Any]]:
+    def _get_resource(
+        self, namespace: str, name: str, kind: str
+    ) -> Optional[Dict[str, Any]]:
         try:
+            result_dict: Optional[Dict[str, Any]] = None
             if kind == "Deployment":
                 resource = self.apps.read_namespaced_deployment(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "StatefulSet":
                 resource = self.apps.read_namespaced_stateful_set(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "DaemonSet":
                 resource = self.apps.read_namespaced_daemon_set(name, namespace)
-                return resource.to_dict()
+                result_dict = dict(resource.to_dict())
             elif kind == "HorizontalPodAutoscaler":
-                resource = self.autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(name, namespace)
-                return resource.to_dict()
+                resource = (
+                    self.autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
+                        name, namespace
+                    )
+                )
+                result_dict = dict(resource.to_dict())
             else:
                 self.logger.warning(f"Tipo de recurso não suportado: {kind}")
                 return None
+            return result_dict
         except Exception:
             self.logger.exception(f"Erro ao buscar recurso {namespace}/{name}/{kind}: ")
             return None
 
-    def _validate_rule(self, rule: ValidationRule, resource: Dict[str, Any],
-                      namespace: str, name: str) -> ValidationResult:
+    def _validate_rule(
+        self, rule: ValidationRule, resource: Dict[str, Any], namespace: str, name: str
+    ) -> ValidationResult:
         validator_name = f"_validate_{rule.id.replace('-', '_').lower()}"
         validator = getattr(self, validator_name, None)
 
         if validator:
-            return validator(rule, resource, namespace, name)
+            result: ValidationResult = validator(rule, resource, namespace, name)
+            return result
         else:
             return self._validate_generic(rule, resource, namespace, name)
 
-    def _validate_generic(self, rule: ValidationRule, resource: Dict[str, Any],
-                        namespace: str, name: str) -> ValidationResult:
+    def _validate_generic(
+        self, rule: ValidationRule, resource: Dict[str, Any], namespace: str, name: str
+    ) -> ValidationResult:
         value = self._extract_value_from_resource(rule.id, resource, namespace, name)
 
         passed = False
@@ -435,16 +574,18 @@ class ScorecardService:
 
         if rule.rule_type == ValidationRuleType.BOOLEAN:
             passed = value is not None
-            message = f"{rule.name}: {'✅ Configurado' if passed else '❌ Não configurado'}"
+            message = (
+                f"{rule.name}: {'✅ Configurado' if passed else '❌ Não configurado'}"
+            )
 
         elif rule.rule_type == ValidationRuleType.NUMERIC and value is not None:
             try:
                 if isinstance(value, str):
-                    if value.endswith('m'):
+                    if value.endswith("m"):
                         num_value = float(value[:-1]) / 1000
-                    elif value.endswith('Mi'):
+                    elif value.endswith("Mi"):
                         num_value = float(value[:-2])
-                    elif value.endswith('Gi'):
+                    elif value.endswith("Gi"):
                         num_value = float(value[:-2]) * 1024
                     else:
                         num_value = float(value)
@@ -460,7 +601,9 @@ class ScorecardService:
                     passed = False
                     message = f"{rule.name}: ❌ Valor {num_value} acima do máximo {rule.max_value}"
                 else:
-                    message = f"{rule.name}: ✅ Valor {num_value} dentro da faixa esperada"
+                    message = (
+                        f"{rule.name}: ✅ Valor {num_value} dentro da faixa esperada"
+                    )
 
             except (ValueError, TypeError) as e:
                 passed = False
@@ -504,11 +647,12 @@ class ScorecardService:
             actual_value=value,
             expected_value=rule.expected_value,
             remediation=rule.remediation,
-            documentation_url=rule.documentation_url
+            documentation_url=rule.documentation_url,
         )
 
-    def _extract_value_from_resource(self, rule_id: str, resource: Dict[str, Any],
-                                namespace: str, name: str) -> Optional[Any]:
+    def _extract_value_from_resource(
+        self, rule_id: str, resource: Dict[str, Any], namespace: str, name: str
+    ) -> Optional[Any]:
         rule_paths = {
             "RES-001": "spec.template.spec.containers[0].livenessProbe",
             "RES-002": "spec.template.spec.containers[0].readinessProbe",
@@ -530,6 +674,11 @@ class ScorecardService:
             "SEC-004": "spec.template.spec.containers[0].securityContext.capabilities.drop",
             "PERF-001": self._calculate_limit_ratio(resource),
             "PERF-002": self._get_hpa_target(namespace, name),
+            "RES-016": self._get_hpa_min_replicas(namespace, name),
+            "PERF-003": self._get_hpa_target(namespace, name),
+            "RES-017": self._get_hpa_scale_up_stabilization(namespace, name),
+            "RES-018": self._get_hpa_scale_down_stabilization(namespace, name),
+            "RES-019": self._check_hpa_behavior_policies(namespace, name),
         }
 
         path_or_func = rule_paths.get(rule_id)
@@ -544,25 +693,28 @@ class ScorecardService:
                         "rule_id": rule_id,
                         "namespace": namespace,
                         "name": name,
-                        "exception": str(e)
-                    }
+                        "exception": str(e),
+                    },
                 )
                 return None
 
         if isinstance(path_or_func, str):
-            parts = path_or_func.split('.')
-            current_value = resource
+            parts = path_or_func.split(".")
+            current_value: Optional[Any] = resource
 
             for part in parts:
                 if current_value is None:
                     return None
 
-                if '[' in part and ']' in part:
+                if "[" in part and "]" in part:
                     try:
-                        key_part = part.split('[')[0]
-                        index_str = part.split('[')[1].rstrip(']')
+                        key_part = part.split("[")[0]
+                        index_str = part.split("[")[1].rstrip("]")
 
-                        if not isinstance(current_value, dict) or key_part not in current_value:
+                        if (
+                            not isinstance(current_value, dict)
+                            or key_part not in current_value
+                        ):
                             return None
 
                         array_value = current_value[key_part]
@@ -586,9 +738,11 @@ class ScorecardService:
                             extra={
                                 "rule_id": rule_id,
                                 "part": part,
-                                "current_value_type": type(current_value).__name__ if current_value else "None",
-                                "exception": str(e)
-                            }
+                                "current_value_type": type(current_value).__name__
+                                if current_value
+                                else "None",
+                                "exception": str(e),
+                            },
                         )
                         return None
 
@@ -603,10 +757,14 @@ class ScorecardService:
 
     def _check_hpa_exists(self, namespace: str, deployment_name: str) -> bool:
         try:
-            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(namespace).items
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
             for hpa in hpas:
-                if (hpa.spec.scale_target_ref.name == deployment_name and
-                    hpa.spec.scale_target_ref.kind == "Deployment"):
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
                     return True
             return False
         except Exception:
@@ -614,45 +772,215 @@ class ScorecardService:
 
     def _check_hpa_metrics(self, namespace: str, deployment_name: str) -> bool:
         try:
-            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(namespace).items
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
             for hpa in hpas:
-                if (hpa.spec.scale_target_ref.name == deployment_name and
-                    hpa.spec.scale_target_ref.kind == "Deployment"):
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
                     return bool(hpa.spec.metrics)
             return False
         except Exception:
             return False
 
+    def _detect_criticality(self, resource: Dict[str, Any]) -> CriticalityLevel:
+        annotations = (resource.get("metadata") or {}).get("annotations") or {}
+        if annotations.get("titlis.io/criticality") == "high":
+            return CriticalityLevel.HIGH
+        return CriticalityLevel.STANDARD
+
+    def _get_hpa_min_replicas(
+        self, namespace: str, deployment_name: str
+    ) -> Optional[int]:
+        try:
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
+            for hpa in hpas:
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
+                    val = hpa.spec.min_replicas
+                    return int(val) if val is not None else None
+            return None
+        except Exception:
+            return None
+
+    def _get_hpa_scale_up_stabilization(
+        self, namespace: str, deployment_name: str
+    ) -> Optional[int]:
+        try:
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
+            for hpa in hpas:
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
+                    behavior = hpa.spec.behavior
+                    if behavior and behavior.scale_up:
+                        val = behavior.scale_up.stabilization_window_seconds
+                        return int(val) if val is not None else None
+            return None
+        except Exception:
+            return None
+
+    def _get_hpa_scale_down_stabilization(
+        self, namespace: str, deployment_name: str
+    ) -> Optional[int]:
+        try:
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
+            for hpa in hpas:
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
+                    behavior = hpa.spec.behavior
+                    if behavior and behavior.scale_down:
+                        val = behavior.scale_down.stabilization_window_seconds
+                        return int(val) if val is not None else None
+            return None
+        except Exception:
+            return None
+
+    def _check_hpa_behavior_policies(
+        self, namespace: str, deployment_name: str
+    ) -> Optional[bool]:
+        try:
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
+            for hpa in hpas:
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
+                    behavior = hpa.spec.behavior
+                    if behavior:
+                        has_up = bool(behavior.scale_up and behavior.scale_up.policies)
+                        has_down = bool(
+                            behavior.scale_down and behavior.scale_down.policies
+                        )
+                        return has_up and has_down
+            return None
+        except Exception:
+            return None
+
     def _check_network_policy_exists(self, namespace: str, resource_name: str) -> bool:
         try:
-            policies = self.networking_v1.list_namespaced_network_policy(namespace).items
+            policies = self.networking_v1.list_namespaced_network_policy(
+                namespace
+            ).items
             return len(policies) > 0
         except Exception:
             return False
 
+    def _validate_ops_001(
+        self, rule: ValidationRule, resource: Dict[str, Any], namespace: str, name: str
+    ) -> ValidationResult:
+        dd_labels = [
+            "tags.datadoghq.com/env",
+            "tags.datadoghq.com/service",
+            "tags.datadoghq.com/version",
+        ]
+        missing: List[str] = []
+
+        metadata_labels = (resource.get("metadata") or {}).get("labels") or {}
+        for label in dd_labels:
+            if not metadata_labels.get(label):
+                missing.append(f"metadata.labels[{label}]")
+
+        template_meta = (
+            (resource.get("spec") or {}).get("template", {}).get("metadata", {})
+        )
+        pod_labels = template_meta.get("labels") or {}
+        for label in dd_labels:
+            if not pod_labels.get(label):
+                missing.append(f"spec.template.metadata.labels[{label}]")
+        if pod_labels.get("admission.datadoghq.com/enabled") != "true":
+            missing.append(
+                "spec.template.metadata.labels[admission.datadoghq.com/enabled=true]"
+            )
+
+        pod_annotations = template_meta.get("annotations") or {}
+        lib_version_raw = pod_annotations.get(
+            "admission.datadoghq.com/python-lib.version"
+        )
+        min_version = (3, 17, 2)
+        if not lib_version_raw:
+            missing.append(
+                "spec.template.metadata.annotations[admission.datadoghq.com/python-lib.version]"
+            )
+        else:
+            version_str = lib_version_raw.lstrip("v")
+            try:
+                parts = tuple(int(x) for x in version_str.split(".")[:3])
+                if parts <= min_version:
+                    missing.append(
+                        f"admission.datadoghq.com/python-lib.version={lib_version_raw} "
+                        f"(requer > v{'.'.join(str(x) for x in min_version)})"
+                    )
+            except ValueError:
+                missing.append(
+                    f"admission.datadoghq.com/python-lib.version={lib_version_raw} (formato inválido)"
+                )
+
+        passed = len(missing) == 0
+        if passed:
+            message = f"{rule.name}: ✅ Instrumentação Datadog configurada corretamente"
+        else:
+            message = (
+                f"{rule.name}: ❌ Configurações ausentes/inválidas: {', '.join(missing)}"
+            )
+
+        return ValidationResult(
+            rule_id=rule.id,
+            rule_name=rule.name,
+            pillar=rule.pillar,
+            passed=passed,
+            severity=rule.severity,
+            weight=rule.weight,
+            message=message,
+            actual_value=lib_version_raw,
+            remediation=rule.remediation,
+            documentation_url=rule.documentation_url,
+        )
+
     def _calculate_limit_ratio(self, resource: Dict[str, Any]) -> Optional[float]:
         try:
-            containers = resource.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
+            containers = (
+                resource.get("spec", {})
+                .get("template", {})
+                .get("spec", {})
+                .get("containers", [])
+            )
             if not containers:
                 return None
 
             container = containers[0]
-            resources = container.get('resources', {})
-            requests = resources.get('requests', {})
-            limits = resources.get('limits', {})
+            resources = container.get("resources", {})
+            requests = resources.get("requests", {})
+            limits = resources.get("limits", {})
 
-            if 'cpu' in requests and 'cpu' in limits:
-                def parse_cpu(cpu_str):
-                    if cpu_str.endswith('m'):
+            if "cpu" in requests and "cpu" in limits:
+
+                def parse_cpu(cpu_str: str) -> float:
+                    if cpu_str.endswith("m"):
                         return float(cpu_str[:-1])
                     else:
                         return float(cpu_str) * 1000
 
-                req_cpu = parse_cpu(requests['cpu'])
-                lim_cpu = parse_cpu(limits['cpu'])
+                req_cpu = parse_cpu(requests["cpu"])
+                lim_cpu = parse_cpu(limits["cpu"])
 
                 if req_cpu > 0:
-                    return lim_cpu / req_cpu
+                    return float(lim_cpu / req_cpu)
 
             return None
         except Exception:
@@ -660,19 +988,26 @@ class ScorecardService:
 
     def _get_hpa_target(self, namespace: str, deployment_name: str) -> Optional[float]:
         try:
-            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(namespace).items
+            hpas = self.autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+                namespace
+            ).items
             for hpa in hpas:
-                if (hpa.spec.scale_target_ref.name == deployment_name and
-                    hpa.spec.scale_target_ref.kind == "Deployment"):
+                if (
+                    hpa.spec.scale_target_ref.name == deployment_name
+                    and hpa.spec.scale_target_ref.kind == "Deployment"
+                ):
                     metrics = hpa.spec.metrics or []
                     for metric in metrics:
                         if metric.type == "Resource" and metric.resource.name == "cpu":
-                            return metric.resource.target.average_utilization
+                            val = metric.resource.target.average_utilization
+                            return float(val) if val is not None else None
             return None
         except Exception:
             return None
 
-    def _calculate_pillar_scores(self, validation_results: List[ValidationResult]) -> Dict[ValidationPillar, PillarScore]:
+    def _calculate_pillar_scores(
+        self, validation_results: List[ValidationResult]
+    ) -> Dict[ValidationPillar, PillarScore]:
         pillar_results = defaultdict(list)
         for result in validation_results:
             pillar_results[result.pillar].append(result)
@@ -692,12 +1027,14 @@ class ScorecardService:
                 passed_checks=sum(1 for r in results if r.passed),
                 total_checks=len(results),
                 weighted_score=weighted_score,
-                validation_results=results
+                validation_results=results,
             )
 
         return pillar_scores
 
-    def _calculate_overall_score(self, pillar_scores: Dict[ValidationPillar, PillarScore]) -> float:
+    def _calculate_overall_score(
+        self, pillar_scores: Dict[ValidationPillar, PillarScore]
+    ) -> float:
         if not pillar_scores:
             return 100.0
 
@@ -722,28 +1059,32 @@ class ScorecardService:
 
     def _store_history(self, scorecard: ResourceScorecard) -> None:
         try:
-            history_key = f"history:{scorecard.resource_namespace}:{scorecard.resource_name}"
+            history_key = (
+                f"history:{scorecard.resource_namespace}:{scorecard.resource_name}"
+            )
             history_str = self.state_store.get(history_key) or "[]"
             history = eval(history_str)
 
             history.append(scorecard.to_dict())
 
             if len(history) > self.config.max_history_per_resource:
-                history = history[-self.config.max_history_per_resource:]
+                history = history[-self.config.max_history_per_resource :]
 
             self.state_store.set(history_key, str(history))
 
         except Exception:
-            self.logger.exception(f"Erro ao armazenar histórico: ")
+            self.logger.exception("Erro ao armazenar histórico")
 
     def get_validation_summary(self, namespace: str) -> Dict[str, Any]:
         deployments = self.apps.list_namespaced_deployment(namespace).items
 
-        summary = {
+        pillar_scores_dict: Dict[str, List[float]] = defaultdict(list)
+        resources_list: List[Dict[str, Any]] = []
+        summary: Dict[str, Any] = {
             "namespace": namespace,
             "total_resources": len(deployments),
-            "pillar_scores": defaultdict(list),
-            "resources": []
+            "pillar_scores": pillar_scores_dict,
+            "resources": resources_list,
         }
 
         for deployment in deployments:
@@ -752,13 +1093,15 @@ class ScorecardService:
             try:
                 scorecard = self.evaluate_resource(namespace, name, "Deployment")
 
-                summary["resources"].append({
-                    "name": name,
-                    "overall_score": scorecard.overall_score,
-                    "critical_issues": scorecard.critical_issues,
-                    "error_issues": scorecard.error_issues,
-                    "warning_issues": scorecard.warning_issues
-                })
+                summary["resources"].append(
+                    {
+                        "name": name,
+                        "overall_score": scorecard.overall_score,
+                        "critical_issues": scorecard.critical_issues,
+                        "error_issues": scorecard.error_issues,
+                        "warning_issues": scorecard.warning_issues,
+                    }
+                )
 
                 for pillar, pillar_score in scorecard.pillar_scores.items():
                     summary["pillar_scores"][pillar.value].append(pillar_score.score)
@@ -774,7 +1117,9 @@ class ScorecardService:
 
         return summary
 
-    def should_notify(self, scorecard: ResourceScorecard, last_notification: Optional[datetime] = None) -> bool:
+    def should_notify(
+        self, scorecard: ResourceScorecard, last_notification: Optional[datetime] = None
+    ) -> bool:
         if last_notification:
             cooldown = timedelta(minutes=self.config.notification_cooldown_minutes)
             if datetime.now(timezone.utc) - last_notification < cooldown:
@@ -786,19 +1131,34 @@ class ScorecardService:
             return True
         elif scorecard.error_issues > 3:
             return True
-        elif scorecard.overall_score < self.config.notify_error_threshold and scorecard.error_issues > 0:
+        elif (
+            scorecard.overall_score < self.config.notify_error_threshold
+            and scorecard.error_issues > 0
+        ):
             return True
-        elif scorecard.overall_score < self.config.notify_warning_threshold and scorecard.warning_issues > 5:
+        elif (
+            scorecard.overall_score < self.config.notify_warning_threshold
+            and scorecard.warning_issues > 5
+        ):
             return True
 
         return False
 
     def get_notification_severity(self, scorecard: ResourceScorecard) -> str:
-        if scorecard.overall_score < self.config.notify_critical_threshold or scorecard.critical_issues > 0:
+        if (
+            scorecard.overall_score < self.config.notify_critical_threshold
+            or scorecard.critical_issues > 0
+        ):
             return "critical"
-        elif scorecard.overall_score < self.config.notify_error_threshold or scorecard.error_issues > 0:
+        elif (
+            scorecard.overall_score < self.config.notify_error_threshold
+            or scorecard.error_issues > 0
+        ):
             return "error"
-        elif scorecard.overall_score < self.config.notify_warning_threshold or scorecard.warning_issues > 0:
+        elif (
+            scorecard.overall_score < self.config.notify_warning_threshold
+            or scorecard.warning_issues > 0
+        ):
             return "warning"
         else:
             return "info"

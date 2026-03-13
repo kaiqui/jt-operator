@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import kopf
 
@@ -11,7 +12,7 @@ logger = get_logger("CastAIMonitorController")
 
 
 @kopf.on.startup()
-async def castai_monitor_startup(**kwargs):
+async def castai_monitor_startup(**kwargs: Any) -> None:
     if not settings.enable_castai_monitor:
         logger.info(
             "CastAI Monitor desabilitado — startup ignorado",
@@ -114,6 +115,7 @@ async def run_castai_health_check() -> None:
             "unhealthy": [r.service for r in results if not r.is_healthy],
         },
     )
+
 
 def register_castai_monitor() -> bool:
     if not settings.enable_castai_monitor:

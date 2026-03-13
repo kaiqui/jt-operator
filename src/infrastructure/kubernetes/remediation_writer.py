@@ -16,7 +16,6 @@ logger = get_logger(__name__)
 
 
 class RemediationWriter:
-
     def __init__(self) -> None:
         self._api: Optional[client.CustomObjectsApi] = None
 

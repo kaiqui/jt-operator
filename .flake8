@@ -1,0 +1,25 @@
+[flake8]
+max-line-length = 88
+extend-ignore =
+    # line too long — handled by black
+    E501,
+    # whitespace before ':' — black formats slices this way
+    E203,
+    # f-string without placeholders — common pattern in logger.exception calls
+    F541,
+    # module-level import not at top — intentional in bootstrap/dependencies.py
+    E402,
+    # docstrings — projeto não usa docstrings
+    D100,D101,D102,D103,D104,D105,D106,D107
+per-file-ignores =
+    # test files: unused imports and variables are common in test suites
+    tests/*:F401,F841
+    # main entry point: imports for side effects (kopf handler registration)
+    src/main.py:F401
+    # bootstrap: unused variable patterns
+    src/bootstrap/dependencies.py:F841
+    # pre-existing unused imports in non-critical helpers
+    src/application/services/slo_metrics_service.py:F401
+    src/domain/enriched_scorecard.py:F401
+    src/infrastructure/kubernetes/castai_health.py:F401
+    src/infrastructure/kubernetes/state_store.py:F841

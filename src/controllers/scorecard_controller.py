@@ -13,12 +13,13 @@ from src.domain.github_models import RemediationIssue, RemediationRequest
 from src.domain.slack_models import NotificationChannel, NotificationSeverity
 from src.domain.models import ResourceScorecard
 from src.application.services.remediation_service import REMEDIABLE_RULE_IDS
-from src.application.services.namespace_notification_buffer import NamespaceNotificationBuffer
+from src.application.services.namespace_notification_buffer import (
+    NamespaceNotificationBuffer,
+)
 from src.settings import settings
 
 
 class ScorecardController(BaseController):
-
     def __init__(self) -> None:
         super().__init__("scorecard")
         self.scorecard_service = get_scorecard_service()
@@ -38,7 +39,9 @@ class ScorecardController(BaseController):
             },
         )
 
-    async def on_resource_event(self, body: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    async def on_resource_event(
+        self, body: Dict[str, Any], **kwargs: Any
+    ) -> Dict[str, Any]:
         ctx = self._get_resource_context(body)
         event_type = kwargs.get("event_type", "unknown")
         namespace = ctx["resource_namespace"]
@@ -48,11 +51,16 @@ class ScorecardController(BaseController):
                 f"Ignorando Deployment no namespace excluído: {namespace}",
                 extra=ctx,
             )
-            return {"ignored": True, "reason": f"Namespace {namespace} está na lista de exclusão"}
+            return {
+                "ignored": True,
+                "reason": f"Namespace {namespace} está na lista de exclusão",
+            }
 
         self.logger.info(f"Deployment {event_type}", extra=ctx)
 
         try:
+            if not self.scorecard_service:
+                return {"evaluated": False, "error": "ScorecardService não disponível"}
             scorecard = self.scorecard_service.evaluate_resource(
                 ctx["resource_namespace"],
                 ctx["resource_name"],
@@ -173,12 +181,11 @@ class ScorecardController(BaseController):
                 "createdAt": pr.created_at.isoformat(),
                 "issuesFixed": [i.rule_id for i in remediable_issues],
             }
-        else:
-            self.logger.warning(
-                "Falha na remediacao automatica",
-                extra={**ctx, "error": result.error},
-            )
-            return None
+        self.logger.warning(
+            "Falha na remediacao automatica",
+            extra={**ctx, "error": result.error},
+        )
+        return None
 
     def _record_remediation(
         self,
@@ -187,6 +194,8 @@ class ScorecardController(BaseController):
         deployment_body: Dict[str, Any],
     ) -> None:
         try:
+            if not self.remediation_writer:
+                return
             meta = deployment_body.get("metadata", {})
             issues = [
                 {"ruleId": rule_id, "ruleName": rule_id}
@@ -250,7 +259,7 @@ class ScorecardController(BaseController):
         self,
         namespace: str,
         scorecards: List[ResourceScorecard],
-    ):
+    ) -> tuple[str, str, Any]:
         sorted_sc = sorted(
             scorecards,
             key=lambda s: (
@@ -280,13 +289,21 @@ class ScorecardController(BaseController):
 
         title = f"{header_emoji} Scorecard Digest — namespace: {namespace}"
 
-        summary_parts = [f"*{total}* app{'s' if total != 1 else ''} avaliado{'s' if total != 1 else ''}"]
+        summary_parts = [
+            f"*{total}* app{'s' if total != 1 else ''} avaliado{'s' if total != 1 else ''}"
+        ]
         if total_critical:
-            summary_parts.append(f"🔴 {total_critical} crítico{'s' if total_critical != 1 else ''}")
+            summary_parts.append(
+                f"🔴 {total_critical} crítico{'s' if total_critical != 1 else ''}"
+            )
         if total_errors:
-            summary_parts.append(f"❌ {total_errors} erro{'s' if total_errors != 1 else ''}")
+            summary_parts.append(
+                f"❌ {total_errors} erro{'s' if total_errors != 1 else ''}"
+            )
         if total_warnings:
-            summary_parts.append(f"⚠️ {total_warnings} warning{'s' if total_warnings != 1 else ''}")
+            summary_parts.append(
+                f"⚠️ {total_warnings} warning{'s' if total_warnings != 1 else ''}"
+            )
         summary_line = " | ".join(summary_parts)
 
         lines = [summary_line, ""]
@@ -335,46 +352,50 @@ class ScorecardController(BaseController):
     def _score_emoji(self, score: float) -> str:
         if score >= 90:
             return "🟢"
-        elif score >= 80:
+        if score >= 80:
             return "🟡"
-        elif score >= 70:
+        if score >= 70:
             return "🟠"
-        else:
-            return "🔴"
+        return "🔴"
 
     def _get_score_status(self, score: float) -> str:
         if score >= 90:
             return "Excelente"
-        elif score >= 80:
+        if score >= 80:
             return "Bom"
-        elif score >= 70:
+        if score >= 70:
             return "Regular"
-        elif score >= 50:
+        if score >= 50:
             return "Insatisfatório"
-        else:
-            return "Crítico"
+        return "Crítico"
 
 
 scorecard_controller = ScorecardController()
 
 
-@kopf.on.resume("apps", "v1", "deployments")
-async def on_deployment_resume(body, **kwargs):
-    return await scorecard_controller.on_resource_event(body, event_type="resume", **kwargs)
+@kopf.on.resume("apps", "v1", "deployments")  # type: ignore[arg-type]
+async def on_deployment_resume(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    return await scorecard_controller.on_resource_event(
+        body, event_type="resume", **kwargs
+    )
 
 
-@kopf.on.create("apps", "v1", "deployments")
-async def on_deployment_create(body, **kwargs):
-    return await scorecard_controller.on_resource_event(body, event_type="create", **kwargs)
+@kopf.on.create("apps", "v1", "deployments")  # type: ignore[arg-type]
+async def on_deployment_create(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    return await scorecard_controller.on_resource_event(
+        body, event_type="create", **kwargs
+    )
 
 
-@kopf.on.update("apps", "v1", "deployments")
-async def on_deployment_update(body, **kwargs):
-    return await scorecard_controller.on_resource_event(body, event_type="update", **kwargs)
+@kopf.on.update("apps", "v1", "deployments")  # type: ignore[arg-type]
+async def on_deployment_update(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+    return await scorecard_controller.on_resource_event(
+        body, event_type="update", **kwargs
+    )
 
 
-@kopf.on.delete("apps", "v1", "deployments")
-async def on_deployment_delete(body, **kwargs):
+@kopf.on.delete("apps", "v1", "deployments")  # type: ignore[arg-type]
+async def on_deployment_delete(body: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
     ctx = scorecard_controller._get_resource_context(body)
 
     await scorecard_controller._send_slack_notification_safe(

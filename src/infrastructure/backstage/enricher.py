@@ -1,15 +1,3 @@
-"""
-infrastructure/backstage/enricher.py
-
-Consulta o catálogo do Backstage para enriquecer scorecards com dados
-de ownership: squad, sistema, tier e configurações customizadas via anotações.
-
-Anotações suportadas no catalog-info.yaml do serviço:
-    titlis.io/slo-target: "99.5"
-    titlis.io/scorecard-enabled: "true"
-    titlis.io/tier: "tier-1"
-    titlis.io/tech-lead: "fulano@empresa.com"
-"""
 from __future__ import annotations
 
 import re
@@ -23,18 +11,6 @@ from src.utils.json_logger import get_logger
 
 
 class BackstageEnricher:
-    """
-    Consulta a API do catálogo Backstage e retorna um BackstageProfile
-    para um dado serviço/namespace Kubernetes.
-
-    Estratégia de lookup (em ordem):
-      1. Busca por anotação `backstage.io/kubernetes-id` = resource_name
-      2. Busca pelo nome do componente igual ao resource_name
-      3. Retorna BackstageProfile.unknown() como fallback
-
-    Cache em memória com TTL configurável para evitar flood de requisições.
-    """
-
     _ANNOTATION_SLO_TARGET = "titlis.io/slo-target"
     _ANNOTATION_SCORECARD_ENABLED = "titlis.io/scorecard-enabled"
     _ANNOTATION_TIER = "titlis.io/tier"
@@ -47,13 +23,6 @@ class BackstageEnricher:
         cache_ttl_seconds: int = 300,
         timeout_seconds: float = 5.0,
     ) -> None:
-        """
-        Args:
-            backstage_url:       URL base do Backstage, ex: "https://backstage.empresa.com"
-            token:               Bearer token para autenticação (se habilitada)
-            cache_ttl_seconds:   Tempo de cache por entry. Default: 5 minutos.
-            timeout_seconds:     Timeout de cada requisição HTTP.
-        """
         self._base_url = backstage_url.rstrip("/")
         self._token = token
         self._cache_ttl = timedelta(seconds=cache_ttl_seconds)
@@ -65,11 +34,9 @@ class BackstageEnricher:
     # API pública
     # ------------------------------------------------------------------
 
-    def get_profile(self, resource_name: str, namespace: str = "default") -> BackstageProfile:
-        """
-        Retorna o BackstageProfile para um workload Kubernetes.
-        Nunca lança exceção — retorna BackstageProfile.unknown() em caso de falha.
-        """
+    def get_profile(
+        self, resource_name: str, namespace: str = "default"
+    ) -> BackstageProfile:
         cache_key = f"{namespace}/{resource_name}"
 
         # Verifica cache
@@ -97,7 +64,6 @@ class BackstageEnricher:
         return profile
 
     def invalidate(self, resource_name: str, namespace: str = "default") -> None:
-        """Remove entrada do cache, forçando nova consulta na próxima chamada."""
         self._cache.pop(f"{namespace}/{resource_name}", None)
 
     # ------------------------------------------------------------------
@@ -105,10 +71,10 @@ class BackstageEnricher:
     # ------------------------------------------------------------------
 
     def _fetch_profile(self, resource_name: str, namespace: str) -> BackstageProfile:
-        """Realiza a consulta efetiva ao catálogo Backstage."""
-
         # Tenta lookup por kubernetes-id primeiro (mais preciso)
-        entity = self._lookup_by_k8s_id(resource_name) or self._lookup_by_name(resource_name)
+        entity = self._lookup_by_k8s_id(resource_name) or self._lookup_by_name(
+            resource_name
+        )
 
         if not entity:
             self.logger.info(
@@ -120,10 +86,6 @@ class BackstageEnricher:
         return self._parse_entity(entity, resource_name)
 
     def _lookup_by_k8s_id(self, resource_name: str) -> Optional[Dict[str, Any]]:
-        """
-        Busca via filter por anotação backstage.io/kubernetes-id.
-        Essa é a forma mais confiável quando o time configura a anotação.
-        """
         url = (
             f"{self._base_url}/api/catalog/entities"
             f"?filter=metadata.annotations.backstage.io/kubernetes-id={resource_name}"
@@ -131,24 +93,24 @@ class BackstageEnricher:
         return self._get_first(url)
 
     def _lookup_by_name(self, resource_name: str) -> Optional[Dict[str, Any]]:
-        """Busca direta pelo nome do componente."""
         url = f"{self._base_url}/api/catalog/entities/by-name/component/default/{resource_name}"
         try:
             resp = self._request("GET", url)
             if resp and resp.status_code == 200:
-                return resp.json()
+                result: Dict[str, Any] = resp.json()
+                return result
         except Exception:
             pass
         return None
 
     def _get_first(self, url: str) -> Optional[Dict[str, Any]]:
-        """Executa GET e retorna o primeiro item da lista, ou None."""
         try:
             resp = self._request("GET", url)
             if resp and resp.status_code == 200:
-                items = resp.json()
+                items: Any = resp.json()
                 if isinstance(items, list) and items:
-                    return items[0]
+                    first: Dict[str, Any] = items[0]
+                    return first
         except Exception:
             pass
         return None
@@ -165,9 +127,9 @@ class BackstageEnricher:
             timeout=self._timeout,
         )
 
-    def _parse_entity(self, entity: Dict[str, Any], resource_name: str) -> BackstageProfile:
-        """Mapeia a resposta do catálogo Backstage para BackstageProfile."""
-
+    def _parse_entity(
+        self, entity: Dict[str, Any], resource_name: str
+    ) -> BackstageProfile:
         metadata = entity.get("metadata", {})
         spec = entity.get("spec", {})
         annotations = metadata.get("annotations", {})
@@ -183,7 +145,10 @@ class BackstageEnricher:
         # Anotações customizadas Titlis
         tier = annotations.get(self._ANNOTATION_TIER)
         tech_lead = annotations.get(self._ANNOTATION_TECH_LEAD)
-        scorecard_enabled = annotations.get(self._ANNOTATION_SCORECARD_ENABLED, "true").lower() != "false"
+        scorecard_enabled = (
+            annotations.get(self._ANNOTATION_SCORECARD_ENABLED, "true").lower()
+            != "false"
+        )
 
         slo_target_override: Optional[float] = None
         raw_slo_target = annotations.get(self._ANNOTATION_SLO_TARGET)

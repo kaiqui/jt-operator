@@ -16,7 +16,6 @@ from src.utils.json_logger import get_logger
 
 
 class ScorecardsStore:
-
     def __init__(self) -> None:
         self._store: Dict[str, EnrichedScorecard] = {}
         self._squad_index: Dict[str, set] = defaultdict(set)
@@ -80,7 +79,10 @@ class ScorecardsStore:
             "total_potential_savings_usd": round(total_savings, 2),
             "critical_services_count": len(critical_services),
             "below_threshold_count": len(below_threshold),
-            "services": [s.to_slack_summary() for s in sorted(services, key=lambda x: x.overall_score)],
+            "services": [
+                s.to_slack_summary()
+                for s in sorted(services, key=lambda x: x.overall_score)
+            ],
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -102,14 +104,15 @@ class ScorecardsStore:
             "avg_score": round(avg_score, 1),
             "total_monthly_cost_usd": round(total_cost, 2),
             "total_potential_savings_usd": round(total_savings, 2),
-            "critical_services_count": sum(1 for s in all_services if s.scorecard.critical_issues > 0),
+            "critical_services_count": sum(
+                1 for s in all_services if s.scorecard.critical_issues > 0
+            ),
             "squads": squads_summary,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
 
 class ScorecardEnricher:
-
     def __init__(
         self,
         store: ScorecardsStore,
@@ -203,9 +206,12 @@ class ScorecardEnricher:
         msg += "*🏛️ DETALHES POR PILAR:*\n"
         for pillar, pillar_score in sc.pillar_scores.items():
             emoji_map = {
-                "resilience": "🛡️", "security": "🔐",
-                "performance": "⚡", "cost": "💰",
-                "operational": "🛠️", "compliance": "📋",
+                "resilience": "🛡️",
+                "security": "🔐",
+                "performance": "⚡",
+                "cost": "💰",
+                "operational": "🛠️",
+                "compliance": "📋",
             }
             emoji = emoji_map.get(pillar.value, "📊")
             msg += (
@@ -229,8 +235,10 @@ class ScorecardEnricher:
         if summary.get("services_count", 0) == 0:
             return f"*Squad {squad}*: sem dados disponíveis."
 
-        score_emoji = "🟢" if summary["avg_score"] >= 90 else (
-            "🟡" if summary["avg_score"] >= 70 else "🔴"
+        score_emoji = (
+            "🟢"
+            if summary["avg_score"] >= 90
+            else ("🟡" if summary["avg_score"] >= 70 else "🔴")
         )
 
         msg = (

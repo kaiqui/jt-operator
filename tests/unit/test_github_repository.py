@@ -1,20 +1,9 @@
-"""
-Testes unitários para GitHubRepository.
-
-Cobre:
-- branch_exists (encontrada / não encontrada / erro HTTP genérico)
-- get_file_content (arquivo encontrado / 404 / erro HTTP)
-- create_branch (sucesso / falha ao obter SHA / falha ao criar ref)
-- commit_files (arquivo novo / arquivo existente / falha parcial)
-- create_pull_request (sucesso / payload correto)
-"""
 import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.domain.github_models import RemediationFile
 from src.infrastructure.github.repository import GitHubRepository
-
 
 # ---------------------------------------------------------------------------
 # Helper para construir resposta httpx falsa
@@ -66,9 +55,7 @@ class TestBranchExists:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_retorna_false_quando_branch_nao_existe_404(
-        self, repo, mock_client
-    ):
+    async def test_retorna_false_quando_branch_nao_existe_404(self, repo, mock_client):
         mock_client.get.side_effect = _make_http_error(404)
         result = await repo.branch_exists("org", "repo", "nonexistent")
         assert result is False
@@ -147,9 +134,7 @@ class TestCreateBranch:
         result = await repo.create_branch("org", "repo", "my-branch", "develop")
 
         assert result is True
-        mock_client.get.assert_called_once_with(
-            "/repos/org/repo/git/ref/heads/develop"
-        )
+        mock_client.get.assert_called_once_with("/repos/org/repo/git/ref/heads/develop")
         mock_client.post.assert_called_once_with(
             "/repos/org/repo/git/refs",
             {"ref": "refs/heads/my-branch", "sha": "abc123"},
@@ -204,9 +189,7 @@ class TestCommitFiles:
         assert payload["sha"] == "old-sha-xyz"
 
     @pytest.mark.asyncio
-    async def test_retorna_false_quando_put_falha(
-        self, repo, mock_client, sample_file
-    ):
+    async def test_retorna_false_quando_put_falha(self, repo, mock_client, sample_file):
         mock_client.get.side_effect = _make_http_error(404)
         mock_client.put.side_effect = Exception("write error")
 
@@ -315,3 +298,84 @@ class TestCreatePullRequest:
                 title="t",
                 body="b",
             )
+
+
+# ---------------------------------------------------------------------------
+# find_merged_remediation_pr
+# ---------------------------------------------------------------------------
+
+
+class TestFindMergedRemediationPr:
+    def _pr_data(self, head_ref: str, merged_at=None):
+        return {
+            "number": 5,
+            "title": "fix: auto-remediation",
+            "html_url": "https://github.com/org/repo/pull/5",
+            "head": {"ref": head_ref},
+            "merged_at": merged_at,
+        }
+
+    @pytest.mark.asyncio
+    async def test_retorna_pr_mergeada_com_prefixo_correto(self, repo, mock_client):
+        mock_client.get_list.return_value = [
+            self._pr_data(
+                "fix/auto-remediation-default-my-app-20240101000000",
+                merged_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        result = await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        assert result is not None
+        assert result.number == 5
+
+    @pytest.mark.asyncio
+    async def test_ignora_pr_fechada_nao_mergeada(self, repo, mock_client):
+        mock_client.get_list.return_value = [
+            self._pr_data(
+                "fix/auto-remediation-default-my-app-20240101000000",
+                merged_at=None,
+            )
+        ]
+        result = await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ignora_pr_com_prefixo_diferente(self, repo, mock_client):
+        mock_client.get_list.return_value = [
+            self._pr_data(
+                "fix/auto-remediation-other-ns-my-app-20240101000000",
+                merged_at="2024-01-01T00:00:00Z",
+            )
+        ]
+        result = await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_retorna_none_sem_prs(self, repo, mock_client):
+        mock_client.get_list.return_value = []
+        result = await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_retorna_none_em_excecao(self, repo, mock_client):
+        mock_client.get_list.side_effect = Exception("API error")
+        result = await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_consulta_state_closed(self, repo, mock_client):
+        mock_client.get_list.return_value = []
+        await repo.find_merged_remediation_pr(
+            "org", "repo", "default", "my-app", "develop"
+        )
+        call_kwargs = mock_client.get_list.call_args[1]["params"]
+        assert call_kwargs["state"] == "closed"

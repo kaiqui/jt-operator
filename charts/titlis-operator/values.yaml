@@ -41,6 +41,35 @@ controllers:
   sloEnabled: true
   autoRemediationEnabled: true
 
+# Remediação — Feature flags de ações
+remediation:
+  enableResources: true
+  enableHpa: true
+  # Perfis de HPA
+  hpaProfileDefault: "light"   # "light" ou "rigid"
+  hpaProfileCritical: "rigid"
+  # Detecção de criticidade via Datadog (requisições/30d)
+  hpaCriticalThresholdRpm: 100000
+  # Defaults de resources
+  defaultCpuRequest: "100m"
+  defaultCpuLimit: "500m"
+  defaultMemoryRequest: "128Mi"
+  defaultMemoryLimit: "512Mi"
+  # HPA replicas e utilization
+  hpaMinReplicas: 2
+  hpaMaxReplicas: 10
+  hpaCpuUtilization: 70
+  hpaMemoryUtilization: 80
+  # HPA behavior — scaleUp
+  hpaBehaviorScaleUpStabilization: 0
+  hpaBehaviorScaleUpPods: 4
+  hpaBehaviorScaleUpPercent: 100
+  hpaBehaviorScaleUpPeriod: 15
+  # HPA behavior — scaleDown
+  hpaBehaviorScaleDownStabilization: 300
+  hpaBehaviorScaleDownPods: 1
+  hpaBehaviorScaleDownPeriod: 60
+
 # CAST AI Monitor
 castai:
   monitorEnabled: false
