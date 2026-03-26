@@ -188,6 +188,9 @@ class Settings(BaseSettings):
     kubernetes_namespace: str = Field(
         default="titlis-system", validation_alias="KUBERNETES_NAMESPACE"
     )
+    kubernetes_cluster_name: str = Field(
+        default="unknown", validation_alias="KUBERNETES_CLUSTER_NAME"
+    )
     service_account_name: str = Field(
         default="titlis-operator", validation_alias="SERVICE_ACCOUNT_NAME"
     )

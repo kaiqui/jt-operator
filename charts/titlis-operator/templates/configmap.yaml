@@ -13,6 +13,7 @@ data:
   LEADER_ELECTION_NAMESPACE: "{{ default "titlis" .Values.operator.leaderElection.namespace }}"
 
   # Kubernetes
+  KUBERNETES_CLUSTER_NAME: "{{ default "unknown" .Values.kubernetes.clusterName }}"
   KUBERNETES_NAMESPACE: "{{ default "titlis-system" .Values.kubernetes.namespace }}"
   SERVICE_ACCOUNT_NAME: "{{ default "titlis-operator" .Values.kubernetes.serviceAccountName }}"
 

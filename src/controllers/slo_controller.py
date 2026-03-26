@@ -1,3 +1,4 @@
+import os
 import kopf
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -5,7 +6,11 @@ from pydantic import ValidationError
 
 from src.controllers.base import BaseController
 from src.domain.models import SLOConfigSpec, SLOType
-from src.bootstrap.dependencies import get_slo_service, get_slo_metrics_service
+from src.bootstrap.dependencies import (
+    get_slo_metrics_service,
+    get_slo_service,
+    get_titlis_api_client,
+)
 from src.domain.slack_models import NotificationSeverity, NotificationChannel
 from src.application.services.slo_metrics_service import SLOAction, SLOErrorKind
 
@@ -284,6 +289,13 @@ class SLOController(BaseController):
                 namespace=resource_namespace,
             )
 
+        await self._send_titlis_api_event(
+            body=body,
+            result=result,
+            resource_namespace=resource_namespace,
+            resource_uid=resource_uid,
+        )
+
         return {
             "success": result["success"],
             "action": result["action"],
@@ -291,6 +303,61 @@ class SLOController(BaseController):
             "error": result["error"] or result["datadog_error"],
             "service": result["spec"].service if result["spec"] else None,
         }
+
+    async def _send_titlis_api_event(
+        self,
+        body: Dict[str, Any],
+        result: Dict[str, Any],
+        resource_namespace: str,
+        resource_uid: Optional[str],
+    ) -> None:
+        titlis_client = get_titlis_api_client()
+        spec = result.get("spec")
+        if not titlis_client or not spec:
+            return
+
+        reconciliation_result = result.get("reconciliation_result", {}) or {}
+        try:
+            await titlis_client.send_slo_reconciled(
+                {
+                    "slo_config_id": resource_uid
+                    or body.get("metadata", {}).get("uid", ""),
+                    "namespace": resource_namespace,
+                    "cluster": self._cluster_name(),
+                    "environment": self._runtime_environment(),
+                    "slo_name": body.get("metadata", {}).get("name", ""),
+                    "slo_type": spec.type.value.upper(),
+                    "timeframe": spec.timeframe.value,
+                    "target": spec.target,
+                    "warning": spec.warning,
+                    "datadog_slo_id": result.get("slo_id"),
+                    "datadog_slo_state": "ok" if result.get("success") else "error",
+                    "sync_action": result.get("action"),
+                    "sync_error": result.get("error") or result.get("datadog_error"),
+                    "actual_value": None,
+                    "auto_detect_framework": spec.auto_detect_framework,
+                    "detected_framework": reconciliation_result.get(
+                        "detected_framework"
+                    ),
+                    "detection_source": reconciliation_result.get("detection_source"),
+                    "k8s_resource_uid": resource_uid,
+                    "app_framework": spec.app_framework.value.upper()
+                    if spec.app_framework
+                    else None,
+                }
+            )
+        except Exception:
+            self.logger.exception("Falha ao enviar SLO reconciliado para a Titlis API")
+
+    @staticmethod
+    def _cluster_name() -> str:
+        from src.settings import settings
+
+        return settings.kubernetes_cluster_name
+
+    @staticmethod
+    def _runtime_environment() -> str:
+        return os.environ.get("APP_ENV") or os.environ.get("DD_ENV") or "unknown"
 
     async def _send_complete_slo_notification(
         self,

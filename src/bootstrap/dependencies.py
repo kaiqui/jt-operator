@@ -439,6 +439,7 @@ def get_remediation_service() -> Any:
         slack_service=slack_service,
         datadog_repository=datadog_repo,
         remediation_settings=settings.remediation,
+        titlis_api_client=get_titlis_api_client(),
     )
 
     logger.info("RemediationService inicializado")

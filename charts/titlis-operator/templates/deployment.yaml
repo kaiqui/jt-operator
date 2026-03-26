@@ -99,6 +99,11 @@ spec:
                   key: LEADER_ELECTION_NAMESPACE
 
             # ── Kubernetes ──────────────────────────────────────────────────
+            - name: KUBERNETES_CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: KUBERNETES_CLUSTER_NAME
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 configMapKeyRef:
