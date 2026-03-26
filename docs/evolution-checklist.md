@@ -39,12 +39,28 @@
 
 | Status | Item | Arquivo(s) Afetado(s) |
 |--------|------|----------------------|
-| `🚧 In Progress` | Criar `TitlisApiUdpClient` em `src/infrastructure/titlis_api/` | src/infrastructure/titlis_api/udp_client.py |
+| `✅ Done` | Criar `TitlisApiUdpClient` em `src/infrastructure/titlis_api/` | src/infrastructure/titlis_api/udp_client.py |
+| `✅ Done` | Criar `TitlisApiPort` (interface) em `src/application/ports/` | src/application/ports/titlis_api_port.py |
+| `✅ Done` | Integrar `get_titlis_api_client()` em `src/bootstrap/dependencies.py` | src/bootstrap/dependencies.py |
+| `✅ Done` | Integrar envio de scorecard avaliado via UDP no `ScorecardController` | src/controllers/scorecard_controller.py |
+| `✅ Done` | Corrigir variáveis indefinidas no payload UDP do `ScorecardController` (`workload_uid`, `name`, campos ausentes no `ResourceScorecard`) | src/controllers/scorecard_controller.py |
+| `✅ Done` | Corrigir bug `@lru_cache` ausente em `get_slo_metrics_service()` | src/bootstrap/dependencies.py |
 | `🚧 In Progress` | Implementar HTTP endpoints para scorecards (Ktor) | titlis-api/src/.../routes/ |
 | `🚧 In Progress` | Implementar servidor UDP TitlisUDP (Ktor/Coroutines) | titlis-api/src/.../udp/ |
 | `📋 Planned` | Remover acesso direto ao DB do Operator | src/bootstrap/dependencies.py |
 | `📋 Planned` | Implementar retry com fallback local (CRD) | src/infrastructure/titlis_api/udp_client.py |
 | `📋 Planned` | Testes de comunicação com falhas de rede | tests/unit/test_titlis_api_client.py |
+
+### Correções e Integrações Realizadas (2026-03-19)
+
+| Item | Descrição |
+|------|-----------|
+| **Bug: `@lru_cache` ausente** | `dependencies.py` linha 119 tinha `lru_cache()` solto sem `@`, causando `get_slo_metrics_service()` não cacheado — corrigido |
+| **Bug: `workload_uid` indefinido** | `scorecard_controller.py` usava `workload_uid` não declarado — corrigido para `body.get("metadata", {}).get("uid", "")` |
+| **Bug: `name` indefinido** | `scorecard_controller.py` usava `name` não declarado — corrigido para `ctx["resource_name"]` |
+| **Bug: campos inexistentes no `ResourceScorecard`** | `compliance_status`, `total_rules`, `passed_rules`, `failed_rules`, `critical_failures`, `error_count`, `warning_count`, `version`, `evaluated_at` não existem no dataclass — mapeados para campos reais: `total_checks`, `passed_checks`, `critical_issues`, `error_issues`, `warning_issues`, `timestamp` |
+| **Bug: `ps.failed_checks` inexistente** | `PillarScore` não tem `failed_checks` — corrigido para `ps.total_checks - ps.passed_checks` |
+| **asdf: Java 21** | Criado `titlis-api/.tool-versions` com `java temurin-21.0.5+11.0.LTS` (o `build.gradle.kts` já usa `jvmToolchain(21)`) |
 
 ### Decisões Arquiteturais — Fase 1
 
@@ -52,7 +68,7 @@
 |----|---------|--------|-------------|
 | AD-001 | Operator sem DB Direct Access | `📋 Pending` | 2026-02-15 |
 | AD-002 | SCD Type 4 mantido para Multi-Tenant | `📋 Pending` | 2026-02-15 |
-| AD-003 | HTTP + UDP para comunicação Operator-API | `📋 Pending` | 2026-02-28 |
+| AD-003 | HTTP + UDP para comunicação Operator-API | `✅ Decided` | 2026-02-28 |
 
 ### Métricas de Sucesso — Fase 1
 

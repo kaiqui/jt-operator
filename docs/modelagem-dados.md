@@ -20,7 +20,7 @@
 │  Estado atual         SCD Type 4            Append-only         │
 │  (leitura rápida)     (versionamento)       (time-series)       │
 │                                                                 │
-│  Frontend/APIs   ←─── Triggers automáticos ──→  Dashboards      │
+│  Frontend/APIs   ←─── Aplicação (audit trail) ──→  Dashboards   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,6 +32,17 @@
 ---
 
 ## DDL Completo
+
+> **Atenção:** O DDL canônico e atualizado está em [`db/schema.sql`](../db/schema.sql).
+> O bloco abaixo é uma versão de referência para leitura contextual — pode estar desatualizado.
+> Para criar o banco, use sempre `db/schema.sql`.
+>
+> **Padrões adotados na revisão DBA:**
+> - PKs no formato `<nome_da_tabela>_id` com tipo `BIGINT GENERATED ALWAYS AS IDENTITY`
+> - Nomes de colunas compostos (evita `name`, `type`, `status` standalone)
+> - `VARCHAR(n)` quando tamanho máximo é conhecido; `TEXT` apenas quando indefinido
+> - `COMMENT ON TABLE/COLUMN` em todas as tabelas e colunas
+> - Sem triggers DML — `updated_at` e audit trail gerenciados pela aplicação
 
 ```sql
 -- ================================================================
@@ -707,23 +718,23 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `id` | UUID | PK | Identificador único do cluster |
-| `name` | VARCHAR(255) | UNIQUE | Nome do cluster Kubernetes |
-| `environment` | VARCHAR(100) | Sim | `production`, `staging`, `develop` |
+| `cluster_id` | BIGINT IDENTITY | PK | Identificador único do cluster |
+| `cluster_name` | VARCHAR(255) | UNIQUE | Nome do cluster Kubernetes |
+| `environment` | VARCHAR(50) | Sim | `production`, `staging`, `develop` |
 | `region` | VARCHAR(100) | Não | Região cloud (us-east-1, brazil-south...) |
 | `provider` | VARCHAR(100) | Não | `aws`, `gcp`, `azure`, `on-prem` |
 | `k8s_version` | VARCHAR(50) | Não | Versão do Kubernetes (ex: `1.29.0`) |
 | `is_active` | BOOLEAN | Sim | Soft-delete do cluster |
 | `created_at` | TIMESTAMPTZ | Sim | Criação do registro |
-| `updated_at` | TIMESTAMPTZ | Sim | Última modificação (trigger automático) |
+| `updated_at` | TIMESTAMPTZ | Sim | Última modificação; atualizada pela aplicação |
 
 ### `titlis_oltp.namespaces`
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `id` | UUID | PK | Identificador único |
-| `cluster_id` | UUID | FK | Cluster ao qual pertence |
-| `name` | VARCHAR(255) | Sim | Nome do namespace no K8s |
+| `namespace_id` | BIGINT IDENTITY | PK | Identificador único |
+| `cluster_id` | BIGINT | FK | Cluster ao qual pertence |
+| `namespace_name` | VARCHAR(255) | Sim | Nome do namespace no K8s |
 | `is_excluded` | BOOLEAN | Sim | Reflete `excluded_namespaces` do `scorecard-config.yaml` |
 | `labels` | JSONB | Não | Labels do namespace no K8s |
 | `annotations` | JSONB | Não | Annotations do namespace no K8s |
@@ -732,12 +743,12 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `id` | UUID | PK | Identificador único |
-| `namespace_id` | UUID | FK | Namespace ao qual pertence |
-| `name` | VARCHAR(255) | Sim | Nome do Deployment no K8s |
-| `kind` | VARCHAR(100) | Sim | `Deployment` (extensível para StatefulSet...) |
+| `workload_id` | BIGINT IDENTITY | PK | Identificador único |
+| `namespace_id` | BIGINT | FK | Namespace ao qual pertence |
+| `workload_name` | VARCHAR(255) | Sim | Nome do Deployment no K8s |
+| `workload_kind` | VARCHAR(100) | Sim | `Deployment` (extensível para StatefulSet...) |
 | `service_tier` | ENUM | Não | TIER_1 a TIER_4 — criticidade do serviço |
-| `dd_git_repository_url` | TEXT | Não | Pré-condição de auto-remediação; ausência bloqueia criação de PR |
+| `dd_git_repository_url` | VARCHAR(500) | Não | Pré-condição de auto-remediação; ausência bloqueia criação de PR |
 | `backstage_component` | VARCHAR(255) | Não | Nome do componente no catálogo Backstage |
 | `owner_team` | VARCHAR(255) | Não | Time responsável (via labels/Backstage) |
 | `resource_version` | VARCHAR(100) | Não | K8s resourceVersion para detecção de mudanças |
@@ -747,12 +758,13 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `id` | UUID | PK | Identificador interno |
+| `validation_rule_id` | BIGINT IDENTITY | PK | Identificador interno surrogate |
 | `rule_id` | VARCHAR(50) | UNIQUE | Código legível: `RES-001`, `PERF-002` |
 | `pillar` | ENUM | Sim | RESILIENCE, SECURITY, COST, PERFORMANCE, OPERATIONAL, COMPLIANCE |
-| `severity` | ENUM | Sim | CRITICAL > ERROR > WARNING > INFO > OPTIONAL |
+| `rule_severity` | ENUM | Sim | CRITICAL > ERROR > WARNING > INFO > OPTIONAL |
 | `rule_type` | ENUM | Sim | BOOLEAN, NUMERIC, ENUM, REGEX |
 | `weight` | NUMERIC(5,2) | Sim | Peso na composição do pillar score |
+| `rule_name` | VARCHAR(255) | Sim | Nome legível da regra para exibição |
 | `is_remediable` | BOOLEAN | Sim | Se o operador pode gerar PR automaticamente |
 | `remediation_category` | ENUM | Condicional | `resources` ou `hpa` (obrigatório se `is_remediable = true`) |
 | `is_active` | BOOLEAN | Sim | Permite desativar regras sem deletar histórico |
@@ -761,8 +773,9 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `workload_id` | UUID | UNIQUE FK | Garante 1 scorecard atual por workload |
-| `version` | INTEGER | Sim | Contador monotônico de avaliações; incremento dispara trigger de histórico |
+| `app_scorecard_id` | BIGINT IDENTITY | PK | Identificador único |
+| `workload_id` | BIGINT | UNIQUE FK | Garante 1 scorecard atual por workload |
+| `version` | INTEGER | Sim | Contador monotônico de avaliações; incremento sinaliza à aplicação para arquivar o estado anterior |
 | `overall_score` | NUMERIC(5,2) | Sim | Score global 0–100 |
 | `compliance_status` | ENUM | Sim | Estado de compliance atual |
 | `total_rules` | INTEGER | Sim | Total de regras avaliadas |
@@ -779,9 +792,10 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `scorecard_id` | UUID | FK | Scorecard ao qual pertence |
+| `pillar_score_id` | BIGINT IDENTITY | PK | Identificador único |
+| `app_scorecard_id` | BIGINT | FK | Scorecard ao qual pertence |
 | `pillar` | ENUM | Sim | Um dos 6 pilares de maturidade |
-| `score` | NUMERIC(5,2) | Sim | Score do pilar (0–100) |
+| `pillar_score` | NUMERIC(5,2) | Sim | Score do pilar (0–100) |
 | `passed_checks` | INTEGER | Sim | Regras aprovadas neste pilar |
 | `failed_checks` | INTEGER | Sim | Regras reprovadas neste pilar |
 | `weighted_score` | NUMERIC(8,4) | Não | Score ponderado pelos pesos das regras |
@@ -790,24 +804,26 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `scorecard_id` | UUID | FK | Scorecard avaliado |
-| `rule_id` | UUID | FK | Regra avaliada |
-| `passed` | BOOLEAN | Sim | Se a regra passou |
-| `message` | TEXT | Não | Mensagem descritiva do resultado |
+| `validation_result_id` | BIGINT IDENTITY | PK | Identificador único |
+| `app_scorecard_id` | BIGINT | FK | Scorecard avaliado |
+| `validation_rule_id` | BIGINT | FK | Regra avaliada |
+| `rule_passed` | BOOLEAN | Sim | Se a regra passou |
+| `result_message` | TEXT | Não | Mensagem descritiva do resultado |
 | `actual_value` | TEXT | Não | Valor observado no Deployment (ex: `"100m"` para CPU) |
 
 ### `titlis_oltp.app_remediations`
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `workload_id` | UUID | UNIQUE FK | 1 remediação ativa por workload — espelha `_pending` set em memória |
+| `app_remediation_id` | BIGINT IDENTITY | PK | Identificador único |
+| `workload_id` | BIGINT | UNIQUE FK | 1 remediação ativa por workload — espelha `_pending` set em memória |
 | `version` | INTEGER | Sim | Contador de ciclos de remediação |
-| `status` | ENUM | Sim | Máquina de estados: `PENDING → IN_PROGRESS → PR_OPEN → PR_MERGED/FAILED` |
-| `scorecard_id` | UUID | FK | Scorecard que originou esta remediação |
+| `app_remediation_status` | ENUM | Sim | Máquina de estados: `PENDING → IN_PROGRESS → PR_OPEN → PR_MERGED/FAILED` |
+| `app_scorecard_id` | BIGINT | FK | Scorecard que originou esta remediação |
 | `github_pr_number` | INTEGER | Não | Número do PR para deep-link |
-| `github_pr_url` | TEXT | Não | URL completa do PR |
-| `github_branch` | TEXT | Não | Branch criado: `fix/auto-remediation-{namespace}-{resource}-*` |
-| `repository_url` | TEXT | Não | Repositório alvo extraído de `DD_GIT_REPOSITORY_URL` |
+| `github_pr_url` | VARCHAR(500) | Não | URL completa do PR |
+| `github_branch` | VARCHAR(255) | Não | Branch criado: `fix/auto-remediation-{namespace}-{resource}-*` |
+| `repository_url` | VARCHAR(500) | Não | Repositório alvo extraído de `DD_GIT_REPOSITORY_URL` |
 | `error_message` | TEXT | Não | Erro em caso de falha |
 | `triggered_at` | TIMESTAMPTZ | Sim | Quando a remediação foi iniciada |
 | `resolved_at` | TIMESTAMPTZ | Não | Preenchido quando status terminal (PR_MERGED ou FAILED) |
@@ -816,18 +832,20 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `remediation_id` | UUID | FK | Remediação à qual pertence |
-| `rule_id` | UUID | FK | Regra que gerou esta issue |
-| `category` | ENUM | Sim | `resources` (CPU/mem) ou `hpa` |
-| `suggested_value` | TEXT | Não | Valor calculado pelo operador antes de `_keep_max` |
-| `applied_value` | TEXT | Não | Valor efetivamente escrito no PR (após `_keep_max`) |
+| `remediation_issue_id` | BIGINT IDENTITY | PK | Identificador único |
+| `app_remediation_id` | BIGINT | FK | Remediação à qual pertence |
+| `validation_rule_id` | BIGINT | FK | Regra que gerou esta issue |
+| `issue_category` | ENUM | Sim | `resources` (CPU/mem) ou `hpa` |
+| `suggested_value` | VARCHAR(100) | Não | Valor calculado pelo operador antes de `_keep_max` |
+| `applied_value` | VARCHAR(100) | Não | Valor efetivamente escrito no PR (após `_keep_max`) |
 
 ### `titlis_oltp.slo_configs`
 
 | Coluna | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `namespace_id` | UUID | FK | Namespace ao qual o SLO pertence |
-| `name` | VARCHAR(255) | Sim | Nome do CRD SLOConfig |
+| `slo_config_id` | BIGINT IDENTITY | PK | Identificador único |
+| `namespace_id` | BIGINT | FK | Namespace ao qual o SLO pertence |
+| `slo_config_name` | VARCHAR(255) | Sim | Nome do CRD SLOConfig |
 | `slo_type` | ENUM | Sim | METRIC, MONITOR ou TIME_SLICE |
 | `timeframe` | ENUM | Sim | `7d`, `30d` ou `90d` |
 | `target` | NUMERIC(6,4) | Sim | Target de compliance (0–100) |
@@ -841,8 +859,9 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Descrição |
 |---|---|---|
-| `workload_id` | UUID | Ref lógica sem FK — histórico sobrevive à deleção do workload |
-| `scorecard_version` | INTEGER | Versão arquivada (`OLD.version` antes do UPDATE) |
+| `app_scorecard_history_id` | BIGINT IDENTITY | Chave primária surrogate |
+| `workload_id` | BIGINT | Ref lógica sem FK — histórico sobrevive à deleção do workload |
+| `scorecard_version` | INTEGER | Versão arquivada (version anterior ao incremento pela aplicação) |
 | `pillar_scores` | JSONB | Snapshot desnormalizado: `[{pillar, score, passed_checks, failed_checks, weighted_score}]` |
 | `validation_results` | JSONB | Snapshot completo: `[{rule_ref, pillar, severity, passed, message, actual_value}]` |
 | `evaluated_at` | TIMESTAMPTZ | Timestamp da avaliação original (não do arquivamento) |
@@ -851,10 +870,11 @@ CREATE INDEX idx_ts_scores_recent
 
 | Coluna | Tipo | Descrição |
 |---|---|---|
-| `workload_id` | UUID | Ref lógica sem FK |
+| `remediation_history_id` | BIGINT IDENTITY | Chave primária surrogate |
+| `workload_id` | BIGINT | Ref lógica sem FK |
 | `remediation_version` | INTEGER | Versão da remediação no momento do registro |
-| `status` | VARCHAR(50) | Status após a transição |
-| `previous_status` | VARCHAR(50) | Status antes da transição — permite reconstruir máquina de estados |
+| `app_remediation_status` | VARCHAR(50) | Status após a transição |
+| `previous_app_remediation_status` | VARCHAR(50) | Status antes da transição — permite reconstruir máquina de estados |
 | `issues_snapshot` | JSONB | Snapshot das issues no momento da transição |
 
 ### `titlis_ts.resource_metrics`

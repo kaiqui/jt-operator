@@ -37,6 +37,13 @@ data:
   CASTAI_COST_CACHE_TTL_SECONDS: "{{ default 300 .Values.castai.costCacheTtlSeconds }}"
   ENABLE_CASTAI_COST_ENRICHMENT: "{{ default false .Values.castai.costEnrichmentEnabled }}"
 
+  # Synthetic Monitor
+  ENABLE_SYNTHETIC_MONITOR: "{{ default false .Values.synthetic.monitorEnabled }}"
+  SYNTHETIC_MONITOR_NAME: "{{ default "jeitto-homepage" .Values.synthetic.monitorName }}"
+  SYNTHETIC_MONITOR_URL: "{{ default "https://jeitto.com.br" .Values.synthetic.monitorUrl }}"
+  SYNTHETIC_MONITOR_INTERVAL_SECONDS: "{{ default 60 .Values.synthetic.monitorIntervalSeconds }}"
+  SYNTHETIC_MONITOR_TIMEOUT_SECONDS: "{{ default 10.0 .Values.synthetic.monitorTimeoutSeconds }}"
+
   # Backstage
   BACKSTAGE_URL: "{{ default "" .Values.backstage.url }}"
   BACKSTAGE_CACHE_TTL_SECONDS: "{{ default 300 .Values.backstage.cacheTtlSeconds }}"

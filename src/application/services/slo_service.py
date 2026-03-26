@@ -25,7 +25,9 @@ class SLOService:
                 slo_uid in existing_slo.tags
                 and "managed_by:titlis_operator" in existing_slo.tags
             ):
-                desired_slo = self._build_slo_from_spec(namespace, service, spec, resource_uid)
+                desired_slo = self._build_slo_from_spec(
+                    namespace, service, spec, resource_uid
+                )
 
                 needs_update = self._compare_slo_parameters(existing_slo, desired_slo)
 
@@ -210,7 +212,9 @@ class SLOService:
         effective_spec = spec
         detection_source = "explicit"
         if spec.auto_detect_framework and spec.app_framework is None:
-            detected_fw, detection_source = self._detect_framework(spec, k8s_annotations)
+            detected_fw, detection_source = self._detect_framework(
+                spec, k8s_annotations
+            )
             effective_spec = spec.model_copy(update={"app_framework": detected_fw})
 
         detected_framework_value = (
@@ -248,7 +252,9 @@ class SLOService:
                     desired_slo = self._build_slo_from_spec(
                         namespace, service, effective_spec, resource_uid
                     )
-                    success = self.datadog_port.update_slo_apps(orphan.slo_id, desired_slo)
+                    success = self.datadog_port.update_slo_apps(
+                        orphan.slo_id, desired_slo
+                    )
                     self.logger.info(
                         "SLO órfão encontrado e atualizado via tag resource_uid",
                         extra={"slo_id": orphan.slo_id, "success": success},
@@ -275,9 +281,7 @@ class SLOService:
                 update_result["detection_source"] = detection_source
                 return update_result
 
-            self.logger.info(
-                "Criando novo SLO", extra={"slo_name": slo_name}
-            )
+            self.logger.info("Criando novo SLO", extra={"slo_name": slo_name})
 
             new_slo = self._build_slo_from_spec(
                 namespace, service, effective_spec, resource_uid

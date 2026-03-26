@@ -123,7 +123,8 @@ class SLOConfigSpec(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Tags adicionais")
     description: Optional[str] = Field(None, description="Descrição do SLO")
     auto_detect_framework: bool = Field(
-        default=False, description="Auto-detectar framework via Datadog Service Definition"
+        default=False,
+        description="Auto-detectar framework via Datadog Service Definition",
     )
 
 

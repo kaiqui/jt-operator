@@ -8,6 +8,7 @@ from src.bootstrap.dependencies import (
     get_remediation_writer,
     get_scorecard_service,
     get_appscorecard_writer,
+    get_titlis_api_client,
 )
 from src.domain.github_models import RemediationIssue, RemediationRequest
 from src.domain.slack_models import NotificationChannel, NotificationSeverity
@@ -107,6 +108,42 @@ class ScorecardController(BaseController):
                 to_send = self._notification_buffer.add_and_maybe_flush(scorecard)
                 if to_send is not None:
                     await self._send_namespace_digest(namespace, to_send)
+            titlis_client = get_titlis_api_client()
+            if titlis_client is not None:
+                workload_uid = body.get("metadata", {}).get("uid", "")
+                compliance_status = (
+                    "compliant" if scorecard.overall_score >= 90 else "non_compliant"
+                )
+                await titlis_client.send_scorecard_evaluated(
+                    {
+                        "workload_id": workload_uid,
+                        "namespace": namespace,
+                        "workload": ctx["resource_name"],
+                        "cluster": settings.kubernetes_namespace,
+                        "k8s_event_type": event_type,
+                        "overall_score": scorecard.overall_score,
+                        "compliance_status": compliance_status,
+                        "total_rules": scorecard.total_checks,
+                        "passed_rules": scorecard.passed_checks,
+                        "failed_rules": scorecard.total_checks
+                        - scorecard.passed_checks,
+                        "critical_failures": scorecard.critical_issues,
+                        "error_count": scorecard.error_issues,
+                        "warning_count": scorecard.warning_issues,
+                        "scorecard_version": 1,
+                        "pillar_scores": [
+                            {
+                                "pillar": ps.pillar.value,
+                                "score": ps.score,
+                                "passed_checks": ps.passed_checks,
+                                "failed_checks": ps.total_checks - ps.passed_checks,
+                                "weighted_score": ps.weighted_score,
+                            }
+                            for ps in scorecard.pillar_scores.values()
+                        ],
+                        "evaluated_at": scorecard.timestamp.isoformat(),
+                    }
+                )
 
             return {
                 "evaluated": True,

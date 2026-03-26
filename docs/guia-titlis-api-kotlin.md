@@ -61,8 +61,10 @@ java -version  # >= 21
 # Gradle wrapper (o projeto gera o próprio)
 # IntelliJ IDEA ou qualquer editor com suporte Kotlin
 
-# PostgreSQL rodando com o schema criado
-psql -U postgres -d titlis -f db/schema.sql
+# PostgreSQL rodando com o schema criado (usar docker-compose para dev local)
+cd db && docker compose up -d
+# ou, se preferir instância local:
+# psql -U titlis -d titlis -f db/schema.sql
 ```
 
 ---
@@ -214,9 +216,9 @@ titlis {
     database {
         url      = "jdbc:postgresql://localhost:5432/titlis"
         url      = ${?DATABASE_URL}
-        user     = "postgres"
+        user     = "titlis"
         user     = ${?DATABASE_USER}
-        password = "postgres"
+        password = "titlis"
         password = ${?DATABASE_PASSWORD}
         pool {
             maxPoolSize       = 10
@@ -331,9 +333,28 @@ package io.titlis.api.database.tables
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.kotlin.datetime.timestampWithTimeZone
 
+// Padrões obrigatórios:
+// - PKs: BIGINT IDENTITY com nome composto (<tabela>_id)
+// - Nomes compostos: cluster_name, workload_kind, rule_severity, pillar_score, etc.
+// - VARCHAR(n) quando tamanho máximo conhecido; TEXT apenas quando indefinido
+// - Sem triggers DML — updated_at e audit trail gerenciados pela aplicação
+
+// Fase 1 — multi-tenant foundation. tenant_id nullable enquanto operador é single-tenant.
+object Tenants : Table("titlis_oltp.tenants") {
+    val tenantId   = long("tenant_id").autoIncrement()
+    val tenantName = varchar("tenant_name", 255)
+    val slug       = varchar("slug", 100)
+    val isActive   = bool("is_active").default(true)
+    val plan       = varchar("plan", 50).default("free")
+    val createdAt  = timestampWithTimeZone("created_at")
+    val updatedAt  = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(tenantId)
+}
+
 object Clusters : Table("titlis_oltp.clusters") {
-    val id          = uuid("id").autoGenerate()
-    val name        = varchar("name", 255)
+    val clusterId   = long("cluster_id").autoIncrement()
+    val tenantId    = long("tenant_id").references(Tenants.tenantId).nullable()
+    val clusterName = varchar("cluster_name", 255)
     val environment = varchar("environment", 100)
     val region      = varchar("region", 100).nullable()
     val provider    = varchar("provider", 100).nullable()
@@ -341,28 +362,29 @@ object Clusters : Table("titlis_oltp.clusters") {
     val isActive    = bool("is_active").default(true)
     val createdAt   = timestampWithTimeZone("created_at")
     val updatedAt   = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    override val primaryKey = PrimaryKey(clusterId)
 }
 
 object Namespaces : Table("titlis_oltp.namespaces") {
-    val id          = uuid("id").autoGenerate()
-    val clusterId   = uuid("cluster_id").references(Clusters.id)
-    val name        = varchar("name", 255)
-    val isExcluded  = bool("is_excluded").default(false)
-    val labels      = jsonb("labels").nullable()
-    val annotations = jsonb("annotations").nullable()
-    val createdAt   = timestampWithTimeZone("created_at")
-    val updatedAt   = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val namespaceId   = long("namespace_id").autoIncrement()
+    val clusterId     = long("cluster_id").references(Clusters.clusterId)
+    val namespaceName = varchar("namespace_name", 255)
+    val isExcluded    = bool("is_excluded").default(false)
+    val labels        = jsonb("labels").nullable()
+    val annotations   = jsonb("annotations").nullable()
+    val createdAt     = timestampWithTimeZone("created_at")
+    val updatedAt     = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(namespaceId)
 }
 
 object Workloads : Table("titlis_oltp.workloads") {
-    val id                   = uuid("id").autoGenerate()
-    val namespaceId          = uuid("namespace_id").references(Namespaces.id)
-    val name                 = varchar("name", 255)
-    val kind                 = varchar("kind", 100).default("Deployment")
+    val workloadId           = long("workload_id").autoIncrement()
+    val namespaceId          = long("namespace_id").references(Namespaces.namespaceId)
+    val workloadName         = varchar("workload_name", 255)
+    val workloadKind         = varchar("workload_kind", 100).default("Deployment")
+    val k8sUid               = varchar("k8s_uid", 255).nullable()  // metadata.uid — chave de negócio para lookups por evento
     val serviceTier          = varchar("service_tier", 20).nullable()
-    val ddGitRepositoryUrl   = text("dd_git_repository_url").nullable()
+    val ddGitRepositoryUrl   = varchar("dd_git_repository_url", 500).nullable()
     val backstageComponent   = varchar("backstage_component", 255).nullable()
     val ownerTeam            = varchar("owner_team", 255).nullable()
     val labels               = jsonb("labels").nullable()
@@ -371,95 +393,131 @@ object Workloads : Table("titlis_oltp.workloads") {
     val isActive             = bool("is_active").default(true)
     val createdAt            = timestampWithTimeZone("created_at")
     val updatedAt            = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    override val primaryKey = PrimaryKey(workloadId)
 }
 
 object ValidationRules : Table("titlis_oltp.validation_rules") {
-    val id                   = uuid("id").autoGenerate()
-    val ruleId               = varchar("rule_id", 50)
-    val pillar               = varchar("pillar", 50)
-    val severity             = varchar("severity", 50)
-    val ruleType             = varchar("rule_type", 50)
-    val weight               = decimal("weight", 5, 2).default(1.0.toBigDecimal())
-    val name                 = varchar("name", 255)
-    val description          = text("description").nullable()
-    val isRemediable         = bool("is_remediable").default(false)
-    val remediationCategory  = varchar("remediation_category", 50).nullable()
-    val isActive             = bool("is_active").default(true)
-    val createdAt            = timestampWithTimeZone("created_at")
-    val updatedAt            = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val validationRuleId    = long("validation_rule_id").autoIncrement()
+    val ruleId              = varchar("rule_id", 50)             // RES-001, PERF-002...
+    val pillar              = varchar("pillar", 50)
+    val ruleSeverity        = varchar("rule_severity", 50)
+    val ruleType            = varchar("rule_type", 50)
+    val weight              = decimal("weight", 5, 2).default(1.0.toBigDecimal())
+    val ruleName            = varchar("rule_name", 255)
+    val description         = text("description").nullable()
+    val isRemediable        = bool("is_remediable").default(false)
+    val remediationCategory = varchar("remediation_category", 50).nullable()  // resources | hpa
+    val isActive            = bool("is_active").default(true)
+    val createdAt           = timestampWithTimeZone("created_at")
+    val updatedAt           = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(validationRuleId)
 }
 
 object AppScorecards : Table("titlis_oltp.app_scorecards") {
-    val id                = uuid("id").autoGenerate()
-    val workloadId        = uuid("workload_id").references(Workloads.id)
-    val version           = integer("version").default(1)
-    val overallScore      = decimal("overall_score", 5, 2)
-    val complianceStatus  = varchar("compliance_status", 50).default("UNKNOWN")
-    val totalRules        = integer("total_rules").default(0)
-    val passedRules       = integer("passed_rules").default(0)
-    val failedRules       = integer("failed_rules").default(0)
-    val criticalFailures  = integer("critical_failures").default(0)
-    val errorCount        = integer("error_count").default(0)
-    val warningCount      = integer("warning_count").default(0)
-    val evaluatedAt       = timestampWithTimeZone("evaluated_at")
-    val k8sEventType      = varchar("k8s_event_type", 50).nullable()
-    val rawMetadata       = jsonb("raw_metadata").nullable()
-    val createdAt         = timestampWithTimeZone("created_at")
-    val updatedAt         = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val appScorecardId   = long("app_scorecard_id").autoIncrement()
+    val workloadId       = long("workload_id").references(Workloads.workloadId)
+    val tenantId         = long("tenant_id").references(Tenants.tenantId).nullable()
+    val version          = integer("version").default(1)
+    val overallScore     = decimal("overall_score", 5, 2)
+    val complianceStatus = varchar("compliance_status", 50).default("UNKNOWN")
+    val totalRules       = integer("total_rules").default(0)
+    val passedRules      = integer("passed_rules").default(0)
+    val failedRules      = integer("failed_rules").default(0)
+    val criticalFailures = integer("critical_failures").default(0)
+    val errorCount       = integer("error_count").default(0)
+    val warningCount     = integer("warning_count").default(0)
+    val evaluatedAt      = timestampWithTimeZone("evaluated_at")
+    val k8sEventType     = varchar("k8s_event_type", 50).nullable()
+    val rawMetadata      = jsonb("raw_metadata").nullable()
+    val createdAt        = timestampWithTimeZone("created_at")
+    val updatedAt        = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(appScorecardId)
 }
 
 object PillarScores : Table("titlis_oltp.pillar_scores") {
-    val id            = uuid("id").autoGenerate()
-    val scorecardId   = uuid("scorecard_id").references(AppScorecards.id)
-    val pillar        = varchar("pillar", 50)
-    val score         = decimal("score", 5, 2)
-    val passedChecks  = integer("passed_checks").default(0)
-    val failedChecks  = integer("failed_checks").default(0)
-    val weightedScore = decimal("weighted_score", 8, 4).nullable()
-    val createdAt     = timestampWithTimeZone("created_at")
-    val updatedAt     = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val pillarScoreId  = long("pillar_score_id").autoIncrement()
+    val appScorecardId = long("app_scorecard_id").references(AppScorecards.appScorecardId)
+    val pillar         = varchar("pillar", 50)
+    val pillarScore    = decimal("pillar_score", 5, 2)
+    val passedChecks   = integer("passed_checks").default(0)
+    val failedChecks   = integer("failed_checks").default(0)
+    val weightedScore  = decimal("weighted_score", 8, 4).nullable()
+    val createdAt      = timestampWithTimeZone("created_at")
+    val updatedAt      = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(pillarScoreId)
+}
+
+object ValidationResults : Table("titlis_oltp.validation_results") {
+    val validationResultId = long("validation_result_id").autoIncrement()
+    val appScorecardId     = long("app_scorecard_id").references(AppScorecards.appScorecardId)
+    val validationRuleId   = long("validation_rule_id").references(ValidationRules.validationRuleId)
+    val rulePassed         = bool("rule_passed")
+    val resultMessage      = text("result_message").nullable()
+    val actualValue        = text("actual_value").nullable()
+    val evaluatedAt        = timestampWithTimeZone("evaluated_at")
+    val createdAt          = timestampWithTimeZone("created_at")
+    override val primaryKey = PrimaryKey(validationResultId)
 }
 
 object AppRemediations : Table("titlis_oltp.app_remediations") {
-    val id              = uuid("id").autoGenerate()
-    val workloadId      = uuid("workload_id").references(Workloads.id)
-    val version         = integer("version").default(1)
-    val scorecardId     = uuid("scorecard_id").references(AppScorecards.id).nullable()
-    val status          = varchar("status", 50).default("PENDING")
-    val githubPrNumber  = integer("github_pr_number").nullable()
-    val githubPrUrl     = text("github_pr_url").nullable()
-    val githubPrTitle   = text("github_pr_title").nullable()
-    val githubBranch    = text("github_branch").nullable()
-    val repositoryUrl   = text("repository_url").nullable()
-    val errorMessage    = text("error_message").nullable()
-    val triggeredAt     = timestampWithTimeZone("triggered_at")
-    val resolvedAt      = timestampWithTimeZone("resolved_at").nullable()
-    val createdAt       = timestampWithTimeZone("created_at")
-    val updatedAt       = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val appRemediationId     = long("app_remediation_id").autoIncrement()
+    val workloadId           = long("workload_id").references(Workloads.workloadId)
+    val tenantId             = long("tenant_id").references(Tenants.tenantId).nullable()
+    val version              = integer("version").default(1)
+    val appScorecardId       = long("app_scorecard_id").references(AppScorecards.appScorecardId).nullable()
+    val appRemediationStatus = varchar("app_remediation_status", 50).default("PENDING")
+    val githubPrNumber       = integer("github_pr_number").nullable()
+    val githubPrUrl          = varchar("github_pr_url", 500).nullable()
+    val githubPrTitle        = varchar("github_pr_title", 500).nullable()
+    val githubBranch         = varchar("github_branch", 255).nullable()
+    val repositoryUrl        = varchar("repository_url", 500).nullable()
+    val errorMessage         = text("error_message").nullable()
+    val triggeredAt          = timestampWithTimeZone("triggered_at")
+    val resolvedAt           = timestampWithTimeZone("resolved_at").nullable()
+    val createdAt            = timestampWithTimeZone("created_at")
+    val updatedAt            = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(appRemediationId)
 }
 
+object RemediationIssues : Table("titlis_oltp.remediation_issues") {
+    val remediationIssueId = long("remediation_issue_id").autoIncrement()
+    val appRemediationId   = long("app_remediation_id").references(AppRemediations.appRemediationId)
+    val validationRuleId   = long("validation_rule_id").references(ValidationRules.validationRuleId)
+    val issueCategory      = varchar("issue_category", 50)    // resources | hpa
+    val suggestedValue     = varchar("suggested_value", 100).nullable()
+    val appliedValue       = varchar("applied_value", 100).nullable()
+    val createdAt          = timestampWithTimeZone("created_at")
+    override val primaryKey = PrimaryKey(remediationIssueId)
+}
+
+// SloConfigs espelha o SLOConfig CRD completo incluindo auto-detecção de framework (H-13)
+// e k8sResourceUid para Path B de idempotência do SLOService (Three-Path idempotency).
 object SloConfigs : Table("titlis_oltp.slo_configs") {
-    val id               = uuid("id").autoGenerate()
-    val namespaceId      = uuid("namespace_id").references(Namespaces.id)
-    val name             = varchar("name", 255)
-    val sloType          = varchar("slo_type", 50)
-    val timeframe        = varchar("timeframe", 10)
-    val target           = decimal("target", 6, 4)
-    val warning          = decimal("warning", 6, 4).nullable()
-    val datadogSloId     = varchar("datadog_slo_id", 255).nullable()
-    val datadogSloState  = varchar("datadog_slo_state", 50).nullable()
-    val lastSyncAt       = timestampWithTimeZone("last_sync_at").nullable()
-    val syncError        = text("sync_error").nullable()
-    val specRaw          = jsonb("spec_raw").nullable()
-    val version          = integer("version").default(1)
-    val createdAt        = timestampWithTimeZone("created_at")
-    val updatedAt        = timestampWithTimeZone("updated_at")
-    override val primaryKey = PrimaryKey(id)
+    val sloConfigId          = long("slo_config_id").autoIncrement()
+    val namespaceId          = long("namespace_id").references(Namespaces.namespaceId)
+    val tenantId             = long("tenant_id").references(Tenants.tenantId).nullable()
+    val sloConfigName        = varchar("slo_config_name", 255)
+    val sloType              = varchar("slo_type", 50)
+    val timeframe            = varchar("timeframe", 10)
+    val target               = decimal("target", 6, 4)
+    val warning              = decimal("warning", 6, 4).nullable()
+    // Framework detection (SLOConfigSpec + SLOConfigStatus)
+    val autoDetectFramework  = bool("auto_detect_framework").default(false)
+    val appFramework         = varchar("app_framework", 50).nullable()  // WSGI | FASTAPI | AIOHTTP
+    val detectedFramework    = varchar("detected_framework", 50).nullable()  // status.detected_framework
+    val detectionSource      = varchar("detection_source", 50).nullable()    // annotation | datadog_tag | fallback
+    // Idempotency — Path B (titlis_resource_uid tag no Datadog)
+    val k8sResourceUid       = varchar("k8s_resource_uid", 255).nullable()
+    // Datadog sync state
+    val datadogSloId         = varchar("datadog_slo_id", 255).nullable()
+    val datadogSloState      = varchar("datadog_slo_state", 50).nullable()
+    val lastSyncAt           = timestampWithTimeZone("last_sync_at").nullable()
+    val syncError            = text("sync_error").nullable()
+    val specRaw              = jsonb("spec_raw").nullable()
+    val version              = integer("version").default(1)
+    val createdAt            = timestampWithTimeZone("created_at")
+    val updatedAt            = timestampWithTimeZone("updated_at")
+    override val primaryKey = PrimaryKey(sloConfigId)
 }
 ```
 
@@ -471,30 +529,61 @@ package io.titlis.api.database.tables
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.kotlin.datetime.timestampWithTimeZone
 
+// Padrão audit: PKs BIGINT IDENTITY com nome composto, sem FK constraints
+// (histórico sobrevive à deleção de workloads/SLOs em titlis_oltp).
+
 object AppScorecardHistory : Table("titlis_audit.app_scorecard_history") {
-    val id                = uuid("id").autoGenerate()
-    val workloadId        = uuid("workload_id")
-    val scorecardVersion  = integer("scorecard_version")
-    val overallScore      = decimal("overall_score", 5, 2)
-    val complianceStatus  = varchar("compliance_status", 50)
-    val totalRules        = integer("total_rules")
-    val passedRules       = integer("passed_rules")
-    val failedRules       = integer("failed_rules")
-    val criticalFailures  = integer("critical_failures")
-    val errorCount        = integer("error_count")
-    val warningCount      = integer("warning_count")
-    val pillarScores      = jsonb("pillar_scores")
-    val validationResults = jsonb("validation_results")
-    val evaluatedAt       = timestampWithTimeZone("evaluated_at")
-    val k8sEventType      = varchar("k8s_event_type", 50).nullable()
-    val createdAt         = timestampWithTimeZone("created_at")
-    override val primaryKey = PrimaryKey(id)
+    val appScorecardHistoryId = long("app_scorecard_history_id").autoIncrement()
+    val workloadId            = long("workload_id")   // ref lógica sem FK
+    val tenantId              = long("tenant_id").nullable()
+    val scorecardVersion      = integer("scorecard_version")
+    val overallScore          = decimal("overall_score", 5, 2)
+    val complianceStatus      = varchar("compliance_status", 50)
+    val totalRules            = integer("total_rules")
+    val passedRules           = integer("passed_rules")
+    val failedRules           = integer("failed_rules")
+    val criticalFailures      = integer("critical_failures")
+    val errorCount            = integer("error_count")
+    val warningCount          = integer("warning_count")
+    val pillarScores          = jsonb("pillar_scores")        // [{pillar, score, passed_checks, failed_checks, weighted_score}]
+    val validationResults     = jsonb("validation_results")   // [{rule_ref, pillar, severity, passed, message, actual_value}]
+    val evaluatedAt           = timestampWithTimeZone("evaluated_at")
+    val k8sEventType          = varchar("k8s_event_type", 50).nullable()
+    val createdAt             = timestampWithTimeZone("created_at")
+    override val primaryKey = PrimaryKey(appScorecardHistoryId)
+}
+
+object PillarScoreHistory : Table("titlis_audit.pillar_score_history") {
+    val pillarScoreHistoryId = long("pillar_score_history_id").autoIncrement()
+    val workloadId           = long("workload_id")    // ref lógica sem FK
+    val scorecardVersion     = integer("scorecard_version")
+    val pillar               = varchar("pillar", 50)
+    val pillarScore          = decimal("pillar_score", 5, 2)
+    val passedChecks         = integer("passed_checks")
+    val failedChecks         = integer("failed_checks")
+    val weightedScore        = decimal("weighted_score", 8, 4).nullable()
+    val evaluatedAt          = timestampWithTimeZone("evaluated_at")
+    val createdAt            = timestampWithTimeZone("created_at")
+    override val primaryKey = PrimaryKey(pillarScoreHistoryId)
+}
+
+// Registra cada transição da máquina de estados PENDING → IN_PROGRESS → PR_OPEN → PR_MERGED/FAILED
+object RemediationHistory : Table("titlis_audit.remediation_history") {
+    val remediationHistoryId          = long("remediation_history_id").autoIncrement()
+    val workloadId                    = long("workload_id")   // ref lógica sem FK
+    val remediationVersion            = integer("remediation_version")
+    val appRemediationStatus          = varchar("app_remediation_status", 50)
+    val previousAppRemediationStatus  = varchar("previous_app_remediation_status", 50).nullable()
+    val issuesSnapshot                = jsonb("issues_snapshot").nullable()
+    val createdAt                     = timestampWithTimeZone("created_at")
+    override val primaryKey = PrimaryKey(remediationHistoryId)
 }
 
 object NotificationLog : Table("titlis_audit.notification_log") {
-    val id                = uuid("id").autoGenerate()
-    val workloadId        = uuid("workload_id").nullable()
-    val namespaceId       = uuid("namespace_id").nullable()
+    val notificationLogId = long("notification_log_id").autoIncrement()
+    val workloadId        = long("workload_id").nullable()
+    val namespaceId       = long("namespace_id").nullable()
+    val tenantId          = long("tenant_id").nullable()
     val notificationType  = varchar("notification_type", 50)
     val severity          = varchar("severity", 50)
     val channel           = varchar("channel", 255).nullable()
@@ -504,24 +593,28 @@ object NotificationLog : Table("titlis_audit.notification_log") {
     val success           = bool("success").default(false)
     val errorMessage      = text("error_message").nullable()
     val createdAt         = timestampWithTimeZone("created_at")
-    override val primaryKey = PrimaryKey(id)
+    override val primaryKey = PrimaryKey(notificationLogId)
 }
 
+// detectedFramework / detectionSource: auditoria de H-13 ao longo do tempo
 object SloComplianceHistory : Table("titlis_audit.slo_compliance_history") {
-    val id             = uuid("id").autoGenerate()
-    val sloConfigId    = uuid("slo_config_id")
-    val namespaceId    = uuid("namespace_id")
-    val sloName        = varchar("slo_name", 255)
-    val datadogSloId   = varchar("datadog_slo_id", 255).nullable()
-    val sloType        = varchar("slo_type", 50)
-    val timeframe      = varchar("timeframe", 10)
-    val target         = decimal("target", 6, 4)
-    val actualValue    = decimal("actual_value", 6, 4).nullable()
-    val sloState       = varchar("slo_state", 50).nullable()
-    val syncAction     = varchar("sync_action", 50).nullable()
-    val syncError      = text("sync_error").nullable()
-    val recordedAt     = timestampWithTimeZone("recorded_at")
-    override val primaryKey = PrimaryKey(id)
+    val sloComplianceHistoryId = long("slo_compliance_history_id").autoIncrement()
+    val sloConfigId            = long("slo_config_id")    // ref lógica sem FK
+    val namespaceId            = long("namespace_id")     // ref lógica sem FK
+    val tenantId               = long("tenant_id").nullable()
+    val sloName                = varchar("slo_name", 255)
+    val datadogSloId           = varchar("datadog_slo_id", 255).nullable()
+    val sloType                = varchar("slo_type", 50)
+    val timeframe              = varchar("timeframe", 10)
+    val target                 = decimal("target", 6, 4)
+    val actualValue            = decimal("actual_value", 6, 4).nullable()
+    val sloState               = varchar("slo_state", 50).nullable()
+    val syncAction             = varchar("sync_action", 50).nullable()
+    val syncError              = text("sync_error").nullable()
+    val detectedFramework      = varchar("detected_framework", 50).nullable()
+    val detectionSource        = varchar("detection_source", 50).nullable()
+    val recordedAt             = timestampWithTimeZone("recorded_at")
+    override val primaryKey = PrimaryKey(sloComplianceHistoryId)
 }
 ```
 
@@ -534,8 +627,9 @@ import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.kotlin.datetime.timestampWithTimeZone
 
 object ResourceMetrics : Table("titlis_ts.resource_metrics") {
-    val id                   = long("id").autoIncrement()
-    val workloadId           = uuid("workload_id")
+    val resourceMetricId     = long("resource_metric_id").autoIncrement()
+    val workloadId           = long("workload_id")  // ref lógica sem FK (append-only)
+    val tenantId             = long("tenant_id").nullable()
     val containerName        = varchar("container_name", 255).nullable()
     val metricSource         = varchar("metric_source", 50).default("datadog")
     val cpuAvgMillicores     = decimal("cpu_avg_millicores", 10, 3).nullable()
@@ -548,12 +642,13 @@ object ResourceMetrics : Table("titlis_ts.resource_metrics") {
     val suggestedMemLimit    = varchar("suggested_mem_limit", 50).nullable()
     val sampleWindow         = varchar("sample_window", 20).nullable()
     val collectedAt          = timestampWithTimeZone("collected_at")
-    override val primaryKey = PrimaryKey(id)
+    override val primaryKey = PrimaryKey(resourceMetricId)
 }
 
 object ScorecardScores : Table("titlis_ts.scorecard_scores") {
-    val id               = long("id").autoIncrement()
-    val workloadId       = uuid("workload_id")
+    val scorecardScoreId = long("scorecard_score_id").autoIncrement()
+    val workloadId       = long("workload_id")  // ref lógica sem FK (append-only)
+    val tenantId         = long("tenant_id").nullable()
     val overallScore     = decimal("overall_score", 5, 2)
     val resilienceScore  = decimal("resilience_score", 5, 2).nullable()
     val securityScore    = decimal("security_score", 5, 2).nullable()
@@ -565,7 +660,7 @@ object ScorecardScores : Table("titlis_ts.scorecard_scores") {
     val passedRules      = integer("passed_rules").nullable()
     val failedRules      = integer("failed_rules").nullable()
     val recordedAt       = timestampWithTimeZone("recorded_at")
-    override val primaryKey = PrimaryKey(id)
+    override val primaryKey = PrimaryKey(scorecardScoreId)
 }
 ```
 
@@ -689,6 +784,11 @@ data class SloReconciledEvent(
     @SerialName("sync_action") val syncAction: String,
     @SerialName("sync_error") val syncError: String? = null,
     @SerialName("actual_value") val actualValue: Double? = null,
+    // Framework detection — persiste status.detected_framework do SLOController (H-13)
+    @SerialName("auto_detect_framework") val autoDetectFramework: Boolean = false,
+    @SerialName("detected_framework") val detectedFramework: String? = null,   // WSGI | FASTAPI | AIOHTTP
+    @SerialName("detection_source") val detectionSource: String? = null,       // annotation | datadog_tag | fallback
+    @SerialName("k8s_resource_uid") val k8sResourceUid: String? = null,        // para tag titlis_resource_uid
 )
 
 @Serializable
@@ -860,68 +960,123 @@ import kotlinx.datetime.toKotlinInstant
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.upsert
 import java.time.Instant
-import java.util.UUID
 
 class ScorecardRepository {
 
+    // Resolve k8s_uid (string UUID do evento) para o workload_id interno (Long BIGINT IDENTITY).
+    // O workload deve existir antes de receber scorecard — inserido pelo WorkloadRepository
+    // ou pela primeira chamada ao endpoint de upsert de workload.
+    private fun resolveWorkloadId(k8sUid: String): Long =
+        Workloads
+            .select(Workloads.workloadId)
+            .where { Workloads.k8sUid eq k8sUid }
+            .singleOrNull()?.get(Workloads.workloadId)
+            ?: error("Workload não encontrado para k8s_uid=$k8sUid")
+
     suspend fun upsertScorecard(event: ScorecardEvaluatedEvent) = dbQuery {
-        val workloadId = UUID.fromString(event.workloadId)
+        val workloadId = resolveWorkloadId(event.workloadId)
         val now = Instant.now().toKotlinInstant()
 
-        // Upsert scorecard atual (SCD Type 4 — trigger DB faz o histórico)
-        AppScorecards.upsert(AppScorecards.workloadId) {
-            it[AppScorecards.workloadId] = workloadId
-            it[version] = event.scorecardVersion
-            it[overallScore] = event.overallScore.toBigDecimal()
-            it[complianceStatus] = event.complianceStatus
-            it[totalRules] = event.totalRules
-            it[passedRules] = event.passedRules
-            it[failedRules] = event.failedRules
-            it[criticalFailures] = event.criticalFailures
-            it[errorCount] = event.errorCount
-            it[warningCount] = event.warningCount
-            it[evaluatedAt] = Instant.parse(event.evaluatedAt).toKotlinInstant()
-            it[k8sEventType] = event.k8sEventType
-            it[updatedAt] = now
+        // SCD Type 4 — a aplicação gerencia o histórico antes do upsert (sem triggers DML).
+        // Se já existe scorecard e a versão mudou, arquiva o estado anterior em app_scorecard_history.
+        val existing = AppScorecards
+            .select(AppScorecards.appScorecardId, AppScorecards.version,
+                    AppScorecards.overallScore, AppScorecards.complianceStatus,
+                    AppScorecards.totalRules, AppScorecards.passedRules,
+                    AppScorecards.failedRules, AppScorecards.criticalFailures,
+                    AppScorecards.errorCount, AppScorecards.warningCount,
+                    AppScorecards.evaluatedAt, AppScorecards.k8sEventType)
+            .where { AppScorecards.workloadId eq workloadId }
+            .singleOrNull()
+
+        if (existing != null && existing[AppScorecards.version] != event.scorecardVersion) {
+            val prevScorecardId = existing[AppScorecards.appScorecardId]
+            val pillarSnap = PillarScores
+                .select(PillarScores.pillar, PillarScores.pillarScore,
+                        PillarScores.passedChecks, PillarScores.failedChecks,
+                        PillarScores.weightedScore)
+                .where { PillarScores.appScorecardId eq prevScorecardId }
+                .map { r ->
+                    mapOf("pillar" to r[PillarScores.pillar],
+                          "score" to r[PillarScores.pillarScore],
+                          "passed_checks" to r[PillarScores.passedChecks],
+                          "failed_checks" to r[PillarScores.failedChecks],
+                          "weighted_score" to r[PillarScores.weightedScore])
+                }
+
+            AppScorecardHistory.insert {
+                it[AppScorecardHistory.workloadId]        = workloadId
+                it[AppScorecardHistory.scorecardVersion]  = existing[AppScorecards.version]
+                it[AppScorecardHistory.overallScore]      = existing[AppScorecards.overallScore]
+                it[AppScorecardHistory.complianceStatus]  = existing[AppScorecards.complianceStatus]
+                it[AppScorecardHistory.totalRules]        = existing[AppScorecards.totalRules]
+                it[AppScorecardHistory.passedRules]       = existing[AppScorecards.passedRules]
+                it[AppScorecardHistory.failedRules]       = existing[AppScorecards.failedRules]
+                it[AppScorecardHistory.criticalFailures]  = existing[AppScorecards.criticalFailures]
+                it[AppScorecardHistory.errorCount]        = existing[AppScorecards.errorCount]
+                it[AppScorecardHistory.warningCount]      = existing[AppScorecards.warningCount]
+                it[AppScorecardHistory.pillarScores]      = org.jetbrains.exposed.sql.json.json(pillarSnap)
+                it[AppScorecardHistory.validationResults] = org.jetbrains.exposed.sql.json.json(emptyList<Any>())
+                it[AppScorecardHistory.evaluatedAt]       = existing[AppScorecards.evaluatedAt]
+                it[AppScorecardHistory.k8sEventType]      = existing[AppScorecards.k8sEventType]
+                it[AppScorecardHistory.createdAt]         = now
+            }
         }
 
-        // Obter scorecard_id recém-upsertado
-        val scorecardId = AppScorecards
-            .select(AppScorecards.id)
+        // Upsert scorecard atual (UNIQUE workload_id — SCD Type 4 "current table")
+        AppScorecards.upsert(AppScorecards.workloadId) {
+            it[AppScorecards.workloadId] = workloadId
+            it[version]          = event.scorecardVersion
+            it[overallScore]     = event.overallScore.toBigDecimal()
+            it[complianceStatus] = event.complianceStatus
+            it[totalRules]       = event.totalRules
+            it[passedRules]      = event.passedRules
+            it[failedRules]      = event.failedRules
+            it[criticalFailures] = event.criticalFailures
+            it[errorCount]       = event.errorCount
+            it[warningCount]     = event.warningCount
+            it[evaluatedAt]      = Instant.parse(event.evaluatedAt).toKotlinInstant()
+            it[k8sEventType]     = event.k8sEventType
+            it[updatedAt]        = now
+        }
+
+        // Obter app_scorecard_id recém-upsertado
+        val appScorecardId = AppScorecards
+            .select(AppScorecards.appScorecardId)
             .where { AppScorecards.workloadId eq workloadId }
-            .single()[AppScorecards.id]
+            .single()[AppScorecards.appScorecardId]
 
         // Substituir pillar_scores (delete + insert — scorecard atual tem CASCADE)
-        PillarScores.deleteWhere { PillarScores.scorecardId eq scorecardId }
+        PillarScores.deleteWhere { PillarScores.appScorecardId eq appScorecardId }
         event.pillarScores.forEach { ps ->
             PillarScores.insert {
-                it[PillarScores.scorecardId] = scorecardId
-                it[pillar] = ps.pillar
-                it[score] = ps.score.toBigDecimal()
-                it[passedChecks] = ps.passedChecks
-                it[failedChecks] = ps.failedChecks
+                it[PillarScores.appScorecardId] = appScorecardId
+                it[pillar]        = ps.pillar
+                it[pillarScore]   = ps.score.toBigDecimal()
+                it[passedChecks]  = ps.passedChecks
+                it[failedChecks]  = ps.failedChecks
                 it[weightedScore] = ps.weightedScore?.toBigDecimal()
-                it[createdAt] = now
-                it[updatedAt] = now
+                it[createdAt]     = now
+                it[updatedAt]     = now
             }
         }
 
         // Inserir na série temporal (append-only)
         ScorecardScores.insert {
-            it[ScorecardScores.workloadId] = workloadId
-            it[overallScore] = event.overallScore.toBigDecimal()
+            it[ScorecardScores.workloadId]    = workloadId
+            it[overallScore]     = event.overallScore.toBigDecimal()
             it[complianceStatus] = event.complianceStatus
-            it[passedRules] = event.passedRules
-            it[failedRules] = event.failedRules
-            it[recordedAt] = now
+            it[passedRules]      = event.passedRules
+            it[failedRules]      = event.failedRules
+            it[recordedAt]       = now
             event.pillarScores.forEach { ps ->
                 when (ps.pillar) {
-                    "RESILIENCE"   -> it[resilienceScore] = ps.score.toBigDecimal()
-                    "SECURITY"     -> it[securityScore] = ps.score.toBigDecimal()
-                    "COST"         -> it[costScore] = ps.score.toBigDecimal()
+                    "RESILIENCE"   -> it[resilienceScore]  = ps.score.toBigDecimal()
+                    "SECURITY"     -> it[securityScore]    = ps.score.toBigDecimal()
+                    "COST"         -> it[costScore]        = ps.score.toBigDecimal()
                     "PERFORMANCE"  -> it[performanceScore] = ps.score.toBigDecimal()
                     "OPERATIONAL"  -> it[operationalScore] = ps.score.toBigDecimal()
-                    "COMPLIANCE"   -> it[complianceScore] = ps.score.toBigDecimal()
+                    "COMPLIANCE"   -> it[complianceScore]  = ps.score.toBigDecimal()
                 }
             }
         }
@@ -929,30 +1084,33 @@ class ScorecardRepository {
 
     suspend fun insertNotificationLog(event: NotificationSentEvent) = dbQuery {
         NotificationLog.insert {
-            it[workloadId] = event.workloadId?.let { id -> UUID.fromString(id) }
-            it[namespaceId] = event.namespaceId?.let { id -> UUID.fromString(id) }
+            it[workloadId]       = event.workloadId?.let { id -> resolveWorkloadId(id) }
             it[notificationType] = event.notificationType
-            it[severity] = event.severity
-            it[channel] = event.channel
-            it[title] = event.title
-            it[messagePreview] = event.messagePreview?.take(500)
-            it[success] = event.success
-            it[errorMessage] = event.errorMessage
-            it[createdAt] = Instant.now().toKotlinInstant()
+            it[severity]         = event.severity
+            it[channel]          = event.channel
+            it[title]            = event.title
+            it[messagePreview]   = event.messagePreview?.take(500)
+            it[success]          = event.success
+            it[errorMessage]     = event.errorMessage
+            it[createdAt]        = Instant.now().toKotlinInstant()
         }
     }
 
     suspend fun getDashboard(clusterName: String? = null): List<Map<String, Any?>> = dbQuery {
         val query = (Workloads innerJoin Namespaces innerJoin Clusters)
-            .leftJoin(AppScorecards, { Workloads.id }, { AppScorecards.workloadId })
-            .leftJoin(AppRemediations, { Workloads.id }, { AppRemediations.workloadId })
+            .leftJoin(AppScorecards, { Workloads.workloadId }, { AppScorecards.workloadId })
+            .leftJoin(AppRemediations, { Workloads.workloadId }, { AppRemediations.workloadId })
             .select(
-                Workloads.id, Clusters.name, Clusters.environment, Namespaces.name,
-                Workloads.name, Workloads.kind, Workloads.serviceTier, Workloads.ownerTeam,
+                Workloads.workloadId, Workloads.k8sUid,
+                Clusters.clusterName, Clusters.environment,
+                Namespaces.namespaceName,
+                Workloads.workloadName, Workloads.workloadKind,
+                Workloads.serviceTier, Workloads.ownerTeam,
                 AppScorecards.overallScore, AppScorecards.complianceStatus,
                 AppScorecards.passedRules, AppScorecards.failedRules,
                 AppScorecards.criticalFailures, AppScorecards.version,
-                AppScorecards.evaluatedAt, AppRemediations.status,
+                AppScorecards.evaluatedAt,
+                AppRemediations.appRemediationStatus,
                 AppRemediations.githubPrUrl, AppRemediations.githubPrNumber,
             )
             .where {
@@ -960,20 +1118,20 @@ class ScorecardRepository {
             }
 
         if (clusterName != null) {
-            query.andWhere { Clusters.name eq clusterName }
+            query.andWhere { Clusters.clusterName eq clusterName }
         }
 
         query.map { row ->
             mapOf(
-                "workload_id" to row[Workloads.id].toString(),
-                "cluster" to row[Clusters.name],
-                "environment" to row[Clusters.environment],
-                "namespace" to row[Namespaces.name],
-                "workload" to row[Workloads.name],
-                "overall_score" to row[AppScorecards.overallScore],
-                "compliance_status" to row[AppScorecards.complianceStatus],
-                "remediation_status" to row[AppRemediations.status],
-                "github_pr_url" to row[AppRemediations.githubPrUrl],
+                "workload_id"        to row[Workloads.k8sUid],
+                "cluster"            to row[Clusters.clusterName],
+                "environment"        to row[Clusters.environment],
+                "namespace"          to row[Namespaces.namespaceName],
+                "workload"           to row[Workloads.workloadName],
+                "overall_score"      to row[AppScorecards.overallScore],
+                "compliance_status"  to row[AppScorecards.complianceStatus],
+                "remediation_status" to row[AppRemediations.appRemediationStatus],
+                "github_pr_url"      to row[AppRemediations.githubPrUrl],
             )
         }
     }
@@ -987,44 +1145,163 @@ package io.titlis.api.repository
 
 import io.titlis.api.database.DatabaseFactory.dbQuery
 import io.titlis.api.database.tables.AppRemediations
+import io.titlis.api.database.tables.RemediationHistory
+import io.titlis.api.database.tables.Workloads
 import io.titlis.api.domain.RemediationEvent
 import kotlinx.datetime.toKotlinInstant
+import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.upsert
 import java.time.Instant
-import java.util.UUID
 
 class RemediationRepository {
 
+    // Resolve k8s_uid para workload_id (Long BIGINT IDENTITY).
+    private fun resolveWorkloadId(k8sUid: String): Long =
+        Workloads
+            .select(Workloads.workloadId)
+            .where { Workloads.k8sUid eq k8sUid }
+            .singleOrNull()?.get(Workloads.workloadId)
+            ?: error("Workload não encontrado para k8s_uid=$k8sUid")
+
     suspend fun upsertRemediation(event: RemediationEvent) = dbQuery {
-        val workloadId = UUID.fromString(event.workloadId)
+        val workloadId = resolveWorkloadId(event.workloadId)
+        val now = Instant.now().toKotlinInstant()
+
+        // SCD Type 4 — a aplicação registra transição de estado em remediation_history (sem triggers DML).
+        val existing = AppRemediations
+            .select(AppRemediations.appRemediationStatus, AppRemediations.version)
+            .where { AppRemediations.workloadId eq workloadId }
+            .singleOrNull()
+
+        if (existing != null &&
+            existing[AppRemediations.appRemediationStatus] != event.status) {
+            RemediationHistory.insert {
+                it[RemediationHistory.workloadId]                   = workloadId
+                it[remediationVersion]                              = event.version
+                it[appRemediationStatus]                            = event.status
+                it[previousAppRemediationStatus]                    = existing[AppRemediations.appRemediationStatus]
+                it[createdAt]                                       = now
+            }
+        }
+
         AppRemediations.upsert(AppRemediations.workloadId) {
-            it[AppRemediations.workloadId] = workloadId
-            it[version] = event.version
-            it[status] = event.status
-            it[githubPrNumber] = event.githubPrNumber
-            it[githubPrUrl] = event.githubPrUrl
-            it[githubBranch] = event.githubBranch
-            it[repositoryUrl] = event.repositoryUrl
-            it[errorMessage] = event.errorMessage
-            it[triggeredAt] = Instant.parse(event.triggeredAt).toKotlinInstant()
-            it[resolvedAt] = event.resolvedAt?.let { ts -> Instant.parse(ts).toKotlinInstant() }
-            it[updatedAt] = Instant.now().toKotlinInstant()
+            it[AppRemediations.workloadId]    = workloadId
+            it[version]                       = event.version
+            it[appRemediationStatus]          = event.status
+            it[githubPrNumber]                = event.githubPrNumber
+            it[githubPrUrl]                   = event.githubPrUrl?.take(500)
+            it[githubBranch]                  = event.githubBranch?.take(255)
+            it[repositoryUrl]                 = event.repositoryUrl?.take(500)
+            it[errorMessage]                  = event.errorMessage
+            it[triggeredAt]                   = Instant.parse(event.triggeredAt).toKotlinInstant()
+            it[resolvedAt]                    = event.resolvedAt?.let { ts -> Instant.parse(ts).toKotlinInstant() }
+            it[updatedAt]                     = now
         }
     }
 
-    suspend fun getByWorkload(workloadId: UUID): Map<String, Any?>? = dbQuery {
+    suspend fun getByWorkload(k8sUid: String): Map<String, Any?>? = dbQuery {
+        val workloadId = Workloads
+            .select(Workloads.workloadId)
+            .where { Workloads.k8sUid eq k8sUid }
+            .singleOrNull()?.get(Workloads.workloadId) ?: return@dbQuery null
+
         AppRemediations
             .select(AppRemediations.columns)
             .where { AppRemediations.workloadId eq workloadId }
             .singleOrNull()
             ?.let { row ->
                 mapOf(
-                    "status" to row[AppRemediations.status],
-                    "version" to row[AppRemediations.version],
-                    "github_pr_url" to row[AppRemediations.githubPrUrl],
+                    "status"          to row[AppRemediations.appRemediationStatus],
+                    "version"         to row[AppRemediations.version],
+                    "github_pr_url"   to row[AppRemediations.githubPrUrl],
                     "github_pr_number" to row[AppRemediations.githubPrNumber],
-                    "triggered_at" to row[AppRemediations.triggeredAt].toString(),
+                    "triggered_at"    to row[AppRemediations.triggeredAt].toString(),
+                )
+            }
+    }
+}
+```
+
+### 5.3 `repository/SloRepository.kt`
+
+```kotlin
+package io.titlis.api.repository
+
+import io.titlis.api.database.DatabaseFactory.dbQuery
+import io.titlis.api.database.tables.SloComplianceHistory
+import io.titlis.api.database.tables.SloConfigs
+import io.titlis.api.domain.SloReconciledEvent
+import kotlinx.datetime.toKotlinInstant
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.upsert
+import java.time.Instant
+
+class SloRepository {
+
+    suspend fun upsertSloConfig(event: SloReconciledEvent) = dbQuery {
+        val now = Instant.now().toKotlinInstant()
+
+        // Upsert estado atual por slo_config_name (chave de negócio no CRD)
+        SloConfigs.upsert(SloConfigs.sloConfigName) {
+            it[sloConfigName]       = event.sloName
+            it[sloType]             = event.sloType
+            it[timeframe]           = event.timeframe
+            it[target]              = event.target.toBigDecimal()
+            it[warning]             = event.warning?.toBigDecimal()
+            it[autoDetectFramework] = event.autoDetectFramework
+            it[detectedFramework]   = event.detectedFramework
+            it[detectionSource]     = event.detectionSource
+            it[k8sResourceUid]      = event.k8sResourceUid
+            it[datadogSloId]        = event.datadogSloId
+            it[datadogSloState]     = event.datadogSloState
+            it[syncError]           = event.syncError
+            it[lastSyncAt]          = now
+            it[updatedAt]           = now
+        }
+
+        // Resolver slo_config_id para o registro de histórico
+        val resolvedSloConfigId = SloConfigs
+            .select(SloConfigs.sloConfigId)
+            .where { SloConfigs.sloConfigName eq event.sloName }
+            .single()[SloConfigs.sloConfigId]
+
+        // Append ao histórico de compliance (sempre — mesmo em noop)
+        SloComplianceHistory.insert {
+            it[sloConfigId]       = resolvedSloConfigId
+            it[sloName]           = event.sloName
+            it[sloType]           = event.sloType
+            it[timeframe]         = event.timeframe
+            it[target]            = event.target.toBigDecimal()
+            it[actualValue]       = event.actualValue?.toBigDecimal()
+            it[sloState]          = event.datadogSloState
+            it[syncAction]        = event.syncAction
+            it[syncError]         = event.syncError
+            it[datadogSloId]      = event.datadogSloId
+            it[detectedFramework] = event.detectedFramework
+            it[detectionSource]   = event.detectionSource
+            it[recordedAt]        = now
+        }
+    }
+
+    suspend fun getByName(namespace: String, name: String): Map<String, Any?>? = dbQuery {
+        SloConfigs
+            .select(SloConfigs.columns)
+            .where { SloConfigs.sloConfigName eq name }
+            .singleOrNull()
+            ?.let { row ->
+                mapOf(
+                    "slo_config_id"     to row[SloConfigs.sloConfigId],
+                    "slo_type"          to row[SloConfigs.sloType],
+                    "timeframe"         to row[SloConfigs.timeframe],
+                    "target"            to row[SloConfigs.target],
+                    "datadog_slo_id"    to row[SloConfigs.datadogSloId],
+                    "datadog_slo_state" to row[SloConfigs.datadogSloState],
+                    "detected_framework" to row[SloConfigs.detectedFramework],
+                    "detection_source"  to row[SloConfigs.detectionSource],
+                    "last_sync_at"      to row[SloConfigs.lastSyncAt]?.toString(),
                 )
             }
     }
@@ -1077,17 +1354,15 @@ import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.titlis.api.repository.RemediationRepository
-import java.util.UUID
 
 fun Application.remediationRoutes(repo: RemediationRepository) {
     routing {
         route("/v1") {
+            // workloadId = k8s metadata.uid (UUID string) — resolvido internamente para Long workload_id
             get("/workloads/{workloadId}/remediation") {
-                val idStr = call.parameters["workloadId"]
+                val k8sUid = call.parameters["workloadId"]
                     ?: return@get call.respond(HttpStatusCode.BadRequest, "workloadId required")
-                val id = runCatching { UUID.fromString(idStr) }
-                    .getOrElse { return@get call.respond(HttpStatusCode.BadRequest, "invalid UUID") }
-                val result = repo.getByWorkload(id)
+                val result = repo.getByWorkload(k8sUid)
                     ?: return@get call.respond(HttpStatusCode.NotFound)
                 call.respond(result)
             }

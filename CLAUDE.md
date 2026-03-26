@@ -196,10 +196,17 @@ ENABLE_CASTAI_COST_ENRICHMENT=false
 ### Titlis API (comunicação operator → banco)
 
 ```bash
-TITLIS_API_ENABLED=false
-TITLIS_API_HOST=titlis-api.titlis-system.svc.cluster.local
-TITLIS_API_UDP_PORT=8125
-TITLIS_API_HTTP_PORT=8080
+# Titlis API — comunicação operator → banco
+TITLIS_API_ENABLED=false                                                  # feature flag
+TITLIS_API_HOST=titlis-api.titlis-system.svc.cluster.local                # hostname do serviço
+TITLIS_API_UDP_PORT=8125                                                   # porta TitlisUDP
+TITLIS_API_HTTP_PORT=8080                                                  # porta REST
+
+# Titlis API — banco de dados (configurado na API, não no operador)
+DATABASE_URL=jdbc:postgresql://postgres:5432/titlis
+DATABASE_USER=titlis_operator
+DATABASE_PASSWORD=<secret>
+DB_POOL_MAX=10
 ```
 
 ### Integrações Opcionais
@@ -900,9 +907,13 @@ psql -U postgres -d titlis -f db/schema.sql
 
 ### Padrões de design do banco
 
-- **SCD Type 4**: tabela corrente (`app_scorecards`) + tabela histórica separada (`app_scorecard_history`). Triggers `BEFORE UPDATE` arquivam automaticamente o estado anterior quando `version` muda.
+- **PKs como BIGINT IDENTITY**: PKs no formato `<nome_da_tabela>_id BIGINT GENERATED ALWAYS AS IDENTITY` — evita fragmentação de UUID randômico e mantém ordem de inserção.
+- **Nomes compostos**: colunas `name`, `type`, `status` standalone são proibidas; usar sempre prefixo composto (`cluster_name`, `app_remediation_status`, etc.).
+- **VARCHAR sobre TEXT**: preferir `VARCHAR(n)` quando o tamanho máximo é conhecido; `TEXT` apenas quando indefinido (ex: mensagens de erro).
+- **SCD Type 4**: tabela corrente (`app_scorecards`) + tabela histórica separada (`app_scorecard_history`). A **aplicação** arquiva o estado anterior quando `version` muda (sem triggers DML).
 - **Never-FK em audit**: tabelas `titlis_audit.*` usam referências lógicas (sem FK constraint) — histórico sobrevive à deleção de workloads.
 - **Snapshot JSONB**: `pillar_scores` e `validation_results` desnormalizados como JSONB no histórico eliminam joins analíticos.
+- **Sem triggers DML**: `updated_at` e audit trail gerenciados pela aplicação — sem functions/triggers que modifiquem dados no banco.
 - **Particionamento futuro**: `titlis_audit.*` e `titlis_ts.*` projetados para `PARTITION BY RANGE` trimestral via `pg_partman`.
 
 ### Quando integrar

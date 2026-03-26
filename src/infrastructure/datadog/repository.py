@@ -387,9 +387,7 @@ class DatadogRepository(DatadogPort):
             query_str = " ".join(tags)
             response = manager.search_slos(query=query_str)
 
-            slos_data = (
-                response.get("data", {}).get("attributes", {}).get("slos", [])
-            )
+            slos_data = response.get("data", {}).get("attributes", {}).get("slos", [])
 
             for slo_data in slos_data:
                 slo_tags = slo_data.get("all_tags", [])
@@ -416,7 +414,5 @@ class DatadogRepository(DatadogPort):
             return None
 
         except Exception:
-            self.logger.exception(
-                "Erro em find_slo_by_tags", extra={"tags": tags}
-            )
+            self.logger.exception("Erro em find_slo_by_tags", extra={"tags": tags})
             return None

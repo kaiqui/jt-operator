@@ -72,7 +72,11 @@ class SLOController(BaseController):
                 has_app_framework = spec.app_framework is not None
                 has_numerator_denominator = bool(spec.numerator and spec.denominator)
                 has_auto_detect = spec.auto_detect_framework
-                if not has_app_framework and not has_numerator_denominator and not has_auto_detect:
+                if (
+                    not has_app_framework
+                    and not has_numerator_denominator
+                    and not has_auto_detect
+                ):
                     result["validation_errors"].append(
                         "SLOs métricos requerem app_framework, numerator e denominator, ou auto_detect_framework: true"
                     )
@@ -192,9 +196,9 @@ class SLOController(BaseController):
                 "error": None
                 if result["success"]
                 else (result["datadog_error"] or "Erro desconhecido"),
-                "detected_framework": result.get(
-                    "reconciliation_result", {}
-                ).get("detected_framework"),
+                "detected_framework": result.get("reconciliation_result", {}).get(
+                    "detected_framework"
+                ),
             }
 
             if result["validation_errors"] and any(

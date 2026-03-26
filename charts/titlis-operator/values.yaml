@@ -80,6 +80,13 @@ castai:
   costCacheTtlSeconds: 300
   costEnrichmentEnabled: false
 
+synthetic:
+  monitorEnabled: false
+  monitorName: "jeitto-homepage"
+  monitorUrl: "https://jeitto.com.br"
+  monitorIntervalSeconds: 60
+  monitorTimeoutSeconds: 10.0
+
 # Backstage
 backstage:
   url: ""

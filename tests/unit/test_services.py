@@ -240,9 +240,7 @@ class TestSLOService:
 
         assert "titlis_resource_uid:my-k8s-uid" in slo.tags
 
-    def test_detect_framework_priority1_annotation(
-        self, slo_service
-    ):
+    def test_detect_framework_priority1_annotation(self, slo_service):
         spec = SLOConfigSpec(
             service="test-service",
             type=SLOType.METRIC,
@@ -278,9 +276,7 @@ class TestSLOService:
         assert fw == SLOAppFramework.AIOHTTP
         assert source == "datadog_tag"
 
-    def test_detect_framework_priority3_fallback(
-        self, slo_service, mock_datadog_port
-    ):
+    def test_detect_framework_priority3_fallback(self, slo_service, mock_datadog_port):
         mock_datadog_port.get_service_definition.return_value = None
 
         spec = SLOConfigSpec(
