@@ -1,3 +1,4 @@
+import os
 import kopf
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from src.bootstrap.dependencies import (
     get_remediation_writer,
     get_scorecard_service,
     get_appscorecard_writer,
+    get_titlis_api_client,
 )
 from src.domain.github_models import RemediationIssue, RemediationRequest
 from src.domain.slack_models import NotificationChannel, NotificationSeverity
@@ -107,6 +109,85 @@ class ScorecardController(BaseController):
                 to_send = self._notification_buffer.add_and_maybe_flush(scorecard)
                 if to_send is not None:
                     await self._send_namespace_digest(namespace, to_send)
+            titlis_client = get_titlis_api_client()
+            if titlis_client is not None:
+                metadata = body.get("metadata", {})
+                workload_uid = metadata.get("uid", "")
+                compliance_status = (
+                    "COMPLIANT" if scorecard.overall_score >= 90 else "NON_COMPLIANT"
+                )
+                validation_rules = {
+                    rule.id: rule for rule in self.scorecard_service.config.rules
+                }
+                try:
+                    await titlis_client.send_scorecard_evaluated(
+                        {
+                            "workload_id": workload_uid,
+                            "namespace": namespace,
+                            "workload": ctx["resource_name"],
+                            "cluster": settings.kubernetes_cluster_name,
+                            "environment": self._runtime_environment(),
+                            "k8s_event_type": event_type,
+                            "overall_score": scorecard.overall_score,
+                            "compliance_status": compliance_status,
+                            "total_rules": scorecard.total_checks,
+                            "passed_rules": scorecard.passed_checks,
+                            "failed_rules": scorecard.total_checks
+                            - scorecard.passed_checks,
+                            "critical_failures": scorecard.critical_issues,
+                            "error_count": scorecard.error_issues,
+                            "warning_count": scorecard.warning_issues,
+                            "scorecard_version": 1,
+                            "workload_kind": ctx["resource_kind"],
+                            "resource_version": metadata.get("resourceVersion"),
+                            "labels": metadata.get("labels", {}),
+                            "annotations": metadata.get("annotations", {}),
+                            "dd_git_repository_url": self._extract_git_repository_url(
+                                body
+                            ),
+                            "raw_metadata": metadata,
+                            "pillar_scores": [
+                                {
+                                    "pillar": ps.pillar.value.upper(),
+                                    "score": ps.score,
+                                    "passed_checks": ps.passed_checks,
+                                    "failed_checks": ps.total_checks - ps.passed_checks,
+                                    "weighted_score": ps.weighted_score,
+                                }
+                                for ps in scorecard.pillar_scores.values()
+                            ],
+                            "validation_results": [
+                                {
+                                    "rule_id": validation.rule_id,
+                                    "rule_name": validation.rule_name,
+                                    "pillar": validation.pillar.value.upper(),
+                                    "passed": validation.passed,
+                                    "severity": validation.severity.value.upper(),
+                                    "rule_type": validation_rules[
+                                        validation.rule_id
+                                    ].rule_type.value.upper(),
+                                    "weight": validation.weight,
+                                    "message": validation.message,
+                                    "actual_value": None
+                                    if validation.actual_value is None
+                                    else str(validation.actual_value),
+                                    "is_remediable": bool(validation.remediation),
+                                    "remediation_category": self._remediation_category(
+                                        validation.rule_id
+                                    ),
+                                }
+                                for pillar_score in scorecard.pillar_scores.values()
+                                for validation in pillar_score.validation_results
+                                if validation.rule_id in validation_rules
+                            ],
+                            "evaluated_at": scorecard.timestamp.isoformat(),
+                        }
+                    )
+                except Exception:
+                    self.logger.exception(
+                        "Falha ao enviar scorecard para a Titlis API",
+                        extra=ctx,
+                    )
 
             return {
                 "evaluated": True,
@@ -213,6 +294,33 @@ class ScorecardController(BaseController):
                 "Falha ao registrar AppRemediation CRD",
                 extra=ctx,
             )
+
+    @staticmethod
+    def _runtime_environment() -> str:
+        return os.environ.get("APP_ENV") or os.environ.get("DD_ENV") or "unknown"
+
+    @staticmethod
+    def _extract_git_repository_url(resource_body: Dict[str, Any]) -> Optional[str]:
+        containers = (
+            resource_body.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [])
+        )
+        for container in containers:
+            for env_var in container.get("env", []):
+                if env_var.get("name") == "DD_GIT_REPOSITORY_URL":
+                    value = env_var.get("value")
+                    return str(value) if value is not None else None
+        return None
+
+    @staticmethod
+    def _remediation_category(rule_id: str) -> Optional[str]:
+        if rule_id in {"RES-007", "RES-008", "PERF-002"}:
+            return "hpa"
+        if rule_id in {"RES-003", "RES-004", "RES-005", "RES-006", "PERF-001"}:
+            return "resources"
+        return None
 
     async def _send_namespace_digest(
         self,

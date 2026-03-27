@@ -267,11 +267,13 @@ class RemediationService:
         slack_service: Optional[SlackNotificationService] = None,
         datadog_repository: Optional[Any] = None,
         remediation_settings: Optional[RemediationSettings] = None,
+        titlis_api_client: Optional[Any] = None,
     ) -> None:
         self._github = github_port
         self._slack = slack_service
         self._datadog = datadog_repository
         self._remediation_settings = remediation_settings or RemediationSettings()
+        self._titlis_api_client = titlis_api_client
         self.logger = get_logger(self.__class__.__name__)
         self._pending: Set[str] = set()
         self._resource_action = ResourceRemediationAction(self._remediation_settings)
@@ -282,6 +284,15 @@ class RemediationService:
     ) -> RemediationResult:
         repo_info = self._extract_git_repo(request.resource_body)
         if not repo_info:
+            await self._emit_remediation_event(
+                request=request,
+                status="SKIPPED",
+                previous_status="PENDING",
+                error=(
+                    f"Env {DD_GIT_REPO_ENV} nao encontrada no Deployment "
+                    f"'{request.resource_name}' — remediacao ignorada"
+                ),
+            )
             self.logger.info(
                 "Remediacao ignorada: DD_GIT_REPOSITORY_URL ausente no Deployment",
                 extra={"resource": f"{request.namespace}/{request.resource_name}"},
@@ -300,6 +311,12 @@ class RemediationService:
             repo_owner, repo_name, request.namespace, request.resource_name
         )
         if resource_key in self._pending:
+            await self._emit_remediation_event(
+                request=request,
+                status="SKIPPED",
+                previous_status="PENDING",
+                error=f"Remediacao ja em andamento para '{resource_key}'",
+            )
             self.logger.info(
                 "Remediacao ignorada: ja em andamento para este recurso",
                 extra={"resource": f"{request.namespace}/{request.resource_name}"},
@@ -317,6 +334,20 @@ class RemediationService:
             base_branch=request.base_branch,
         )
         if existing_pr:
+            await self._emit_remediation_event(
+                request=request,
+                status="SKIPPED",
+                previous_status="PENDING",
+                github_pr_number=existing_pr.number,
+                github_pr_title=existing_pr.title,
+                github_pr_url=existing_pr.url,
+                github_branch=existing_pr.branch,
+                error=(
+                    f"PR de remediacao ja existe: "
+                    f"#{existing_pr.number} — {existing_pr.url}"
+                ),
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             self.logger.info(
                 "PR de remediacao ja existe aberta — remediacao ignorada",
                 extra={
@@ -342,6 +373,20 @@ class RemediationService:
             base_branch=request.base_branch,
         )
         if merged_pr:
+            await self._emit_remediation_event(
+                request=request,
+                status="SKIPPED",
+                previous_status="PENDING",
+                github_pr_number=merged_pr.number,
+                github_pr_title=merged_pr.title,
+                github_pr_url=merged_pr.url,
+                github_branch=merged_pr.branch,
+                error=(
+                    f"PR de remediacao ja foi mergeada: "
+                    f"#{merged_pr.number} — {merged_pr.url}"
+                ),
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             self.logger.info(
                 "PR de remediacao ja foi mergeada — remediacao ignorada",
                 extra={
@@ -381,10 +426,17 @@ class RemediationService:
                 "target_repo": f"{repo_owner}/{repo_name}",
             },
         )
+        await self._emit_remediation_event(
+            request=request,
+            status="IN_PROGRESS",
+            previous_status="PENDING",
+            repository_url=self._repository_url(repo_owner, repo_name),
+        )
 
         metrics = self._fetch_profiling_metrics(
             request.resource_name, request.namespace
         )
+        await self._emit_resource_metrics(request, metrics)
         hpa_profile = self._detect_hpa_profile(
             request.resource_body, request.resource_name
         )
@@ -407,6 +459,13 @@ class RemediationService:
         )
 
         if not modified_content:
+            await self._emit_remediation_event(
+                request=request,
+                status="FAILED",
+                previous_status="IN_PROGRESS",
+                error="Nenhuma modificacao gerada para o deploy.yaml",
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             return RemediationResult(
                 success=False,
                 error="Nenhuma modificacao gerada para o deploy.yaml",
@@ -426,6 +485,14 @@ class RemediationService:
             base_branch=request.base_branch,
         )
         if not created:
+            await self._emit_remediation_event(
+                request=request,
+                status="FAILED",
+                previous_status="IN_PROGRESS",
+                github_branch=branch_name,
+                error=f"Falha ao criar branch '{branch_name}'",
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             return RemediationResult(
                 success=False,
                 branch_name=branch_name,
@@ -439,6 +506,14 @@ class RemediationService:
             files=[deploy_file],
         )
         if not committed:
+            await self._emit_remediation_event(
+                request=request,
+                status="FAILED",
+                previous_status="IN_PROGRESS",
+                github_branch=branch_name,
+                error="Falha ao commitar as modificacoes no deploy.yaml",
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             return RemediationResult(
                 success=False,
                 branch_name=branch_name,
@@ -456,6 +531,14 @@ class RemediationService:
             )
         except Exception as exc:
             self.logger.exception("Erro ao criar Pull Request")
+            await self._emit_remediation_event(
+                request=request,
+                status="FAILED",
+                previous_status="IN_PROGRESS",
+                github_branch=branch_name,
+                error=f"Falha ao criar Pull Request: {exc}",
+                repository_url=self._repository_url(repo_owner, repo_name),
+            )
             return RemediationResult(
                 success=False,
                 branch_name=branch_name,
@@ -465,6 +548,16 @@ class RemediationService:
         pr.issues_fixed = [i.rule_id for i in request.issues]
 
         await self._notify_slack(request, pr, categories, metrics)
+        await self._emit_remediation_event(
+            request=request,
+            status="PR_OPEN",
+            previous_status="IN_PROGRESS",
+            github_pr_number=pr.number,
+            github_pr_title=pr.title,
+            github_pr_url=pr.url,
+            github_branch=pr.branch,
+            repository_url=self._repository_url(repo_owner, repo_name),
+        )
 
         self.logger.info(
             "Remediacao concluida com sucesso",
@@ -764,23 +857,35 @@ class RemediationService:
             {"title": "Categories", "value": cats_str, "short": "true"},
             {"title": "Generated By", "value": "titlis-operator", "short": "true"},
         ]
+        title = f"Auto-Remediacao PR Criado — {cats_str}"
+        message = (
+            f"*Recurso:* `{request.namespace}/{request.resource_name}`"
+            f" ({request.resource_kind})\n"
+            f"*Categorias:* {cats_str}\n"
+            f"*Branch:* `{pr.branch}` -> `{pr.base_branch}`\n"
+            f"*Issues ({len(request.issues)}):*\n{issues_text}"
+            f"{metrics_line}\n"
+            f"*PR:* <{pr.url}|#{pr.number} — revisao obrigatoria>"
+        )
 
         try:
-            await self._slack.send_notification(
-                title=f"Auto-Remediacao PR Criado — {cats_str}",
-                message=(
-                    f"*Recurso:* `{request.namespace}/{request.resource_name}`"
-                    f" ({request.resource_kind})\n"
-                    f"*Categorias:* {cats_str}\n"
-                    f"*Branch:* `{pr.branch}` -> `{pr.base_branch}`\n"
-                    f"*Issues ({len(request.issues)}):*\n{issues_text}"
-                    f"{metrics_line}\n"
-                    f"*PR:* <{pr.url}|#{pr.number} — revisao obrigatoria>"
-                ),
+            success = await self._slack.send_notification(
+                title=title,
+                message=message,
                 severity=NotificationSeverity.WARNING,
                 channel=NotificationChannel.OPERATIONAL,
                 namespace=request.namespace,
                 additional_fields=additional_fields,
+            )
+            await self._emit_notification_log(
+                namespace=request.namespace,
+                notification_type="remediation",
+                severity=NotificationSeverity.WARNING,
+                channel=NotificationChannel.OPERATIONAL,
+                title=title,
+                message=message,
+                success=success,
+                workload_id=request.resource_body.get("metadata", {}).get("uid"),
             )
             self.logger.info(
                 "Notificacao Slack de remediacao enviada",
@@ -788,3 +893,146 @@ class RemediationService:
             )
         except Exception:
             self.logger.exception("Falha ao enviar notificacao Slack de remediacao")
+            await self._emit_notification_log(
+                namespace=request.namespace,
+                notification_type="remediation",
+                severity=NotificationSeverity.WARNING,
+                channel=NotificationChannel.OPERATIONAL,
+                title=title,
+                message=message,
+                success=False,
+                workload_id=request.resource_body.get("metadata", {}).get("uid"),
+                error_message="Falha ao enviar notificacao Slack de remediacao",
+            )
+
+    async def _emit_remediation_event(
+        self,
+        request: RemediationRequest,
+        status: str,
+        previous_status: Optional[str] = None,
+        github_pr_number: Optional[int] = None,
+        github_pr_title: Optional[str] = None,
+        github_pr_url: Optional[str] = None,
+        github_branch: Optional[str] = None,
+        error: Optional[str] = None,
+        repository_url: Optional[str] = None,
+    ) -> None:
+        if not self._titlis_api_client:
+            return
+
+        try:
+            await self._titlis_api_client.send_remediation_event(
+                {
+                    "workload_id": request.resource_body.get("metadata", {}).get(
+                        "uid", ""
+                    ),
+                    "namespace": request.namespace,
+                    "workload": request.resource_name,
+                    "status": status,
+                    "previous_status": previous_status,
+                    "version": 1,
+                    "github_pr_title": github_pr_title,
+                    "github_pr_number": github_pr_number,
+                    "github_pr_url": github_pr_url,
+                    "github_branch": github_branch,
+                    "repository_url": repository_url,
+                    "issues_snapshot": [
+                        {
+                            "rule_id": issue.rule_id,
+                            "rule_name": issue.rule_name,
+                            "category": issue.category.value,
+                            "description": issue.description,
+                            "remediation": issue.remediation,
+                        }
+                        for issue in request.issues
+                    ],
+                    "error_message": error,
+                    "triggered_at": datetime.now(timezone.utc).isoformat(),
+                    "resolved_at": datetime.now(timezone.utc).isoformat()
+                    if status in {"FAILED", "PR_OPEN", "SKIPPED"}
+                    else None,
+                }
+            )
+        except Exception:
+            self.logger.exception("Falha ao enviar evento de remediação para a API")
+
+    async def _emit_resource_metrics(
+        self,
+        request: RemediationRequest,
+        metrics: Optional[DatadogProfilingMetrics],
+    ) -> None:
+        if not self._titlis_api_client or not metrics:
+            return
+
+        containers = (
+            request.resource_body.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("containers", [])
+        )
+        container_name = containers[0].get("name") if containers else None
+
+        try:
+            await self._titlis_api_client.send_resource_metrics(
+                {
+                    "workload_id": request.resource_body.get("metadata", {}).get(
+                        "uid", ""
+                    ),
+                    "namespace": request.namespace,
+                    "workload": request.resource_name,
+                    "container_name": container_name,
+                    "cpu_avg_millicores": metrics.cpu_avg_millicores,
+                    "mem_avg_mib": metrics.memory_avg_mib,
+                    "suggested_cpu_request": metrics.suggest_cpu_request(
+                        default=self._remediation_settings.default_cpu_request
+                    ),
+                    "suggested_cpu_limit": metrics.suggest_cpu_limit(
+                        default=self._remediation_settings.default_cpu_limit
+                    ),
+                    "suggested_mem_request": metrics.suggest_memory_request(
+                        default=self._remediation_settings.default_memory_request
+                    ),
+                    "suggested_mem_limit": metrics.suggest_memory_limit(
+                        default=self._remediation_settings.default_memory_limit
+                    ),
+                    "sample_window": "1h",
+                }
+            )
+        except Exception:
+            self.logger.exception("Falha ao enviar métricas de recurso para a API")
+
+    async def _emit_notification_log(
+        self,
+        namespace: str,
+        notification_type: str,
+        severity: NotificationSeverity,
+        channel: NotificationChannel,
+        title: str,
+        message: str,
+        success: bool,
+        workload_id: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        if not self._titlis_api_client:
+            return
+
+        try:
+            await self._titlis_api_client.send_notification_log(
+                {
+                    "workload_id": workload_id,
+                    "namespace": namespace,
+                    "notification_type": notification_type,
+                    "severity": severity.value.upper(),
+                    "channel": channel.value,
+                    "title": title,
+                    "message_preview": message[:500],
+                    "success": success,
+                    "error_message": error_message,
+                }
+            )
+        except Exception:
+            self.logger.exception("Falha ao enviar log de notificação para a API")
+
+    @staticmethod
+    def _repository_url(repo_owner: str, repo_name: str) -> str:
+        return f"https://github.com/{repo_owner}/{repo_name}"

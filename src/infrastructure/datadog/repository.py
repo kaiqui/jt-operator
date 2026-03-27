@@ -379,3 +379,40 @@ class DatadogRepository(DatadogPort):
                 extra={"service_name": service_name, "days": days},
             )
             return None
+
+    def find_slo_by_tags(self, tags: List[str]) -> Optional[SLO]:
+        self.logger.info("Buscando SLO por tags", extra={"tags": tags})
+        try:
+            manager = self.factory.create_manager("slo")
+            query_str = " ".join(tags)
+            response = manager.search_slos(query=query_str)
+
+            slos_data = response.get("data", {}).get("attributes", {}).get("slos", [])
+
+            for slo_data in slos_data:
+                slo_tags = slo_data.get("all_tags", [])
+                if all(t in slo_tags for t in tags):
+                    try:
+                        return SLO(
+                            name=slo_data.get("name", ""),
+                            service_name=slo_data.get("name", ""),
+                            slo_type=SLOType(slo_data.get("slo_type")),
+                            target_threshold=self._extract_target_threshold(slo_data),
+                            warning_threshold=self._extract_warning_threshold(slo_data),
+                            timeframe=SLOTimeframe(slo_data.get("timeframe", "30d")),
+                            description=slo_data.get("description"),
+                            tags=slo_tags,
+                            query=slo_data.get("query"),
+                            thresholds=slo_data.get("thresholds", []),
+                            slo_id=slo_data.get("id"),
+                        )
+                    except Exception:
+                        self.logger.warning(
+                            "Erro ao converter SLO em find_slo_by_tags",
+                            extra={"slo_data": slo_data},
+                        )
+            return None
+
+        except Exception:
+            self.logger.exception("Erro em find_slo_by_tags", extra={"tags": tags})
+            return None

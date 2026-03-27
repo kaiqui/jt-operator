@@ -193,6 +193,22 @@ ENABLE_BACKSTAGE_ENRICHMENT=false
 ENABLE_CASTAI_COST_ENRICHMENT=false
 ```
 
+### Titlis API (comunicação operator → banco)
+
+```bash
+# Titlis API — comunicação operator → banco
+TITLIS_API_ENABLED=false                                                  # feature flag
+TITLIS_API_HOST=titlis-api.titlis-system.svc.cluster.local                # hostname do serviço
+TITLIS_API_UDP_PORT=8125                                                   # porta TitlisUDP
+TITLIS_API_HTTP_PORT=8080                                                  # porta REST
+
+# Titlis API — banco de dados (configurado na API, não no operador)
+DATABASE_URL=jdbc:postgresql://postgres:5432/titlis
+DATABASE_USER=titlis_operator
+DATABASE_PASSWORD=<secret>
+DB_POOL_MAX=10
+```
+
 ### Integrações Opcionais
 
 ```bash
@@ -342,8 +358,8 @@ jt-operator/
 | `ScorecardConfig` | Configuração do sistema de scorecard (regras, thresholds) |
 | `SLO` | Definição de SLO |
 | `ServiceDefinition` | Definição de serviço no Datadog |
-| `SLOConfigSpec` | Spec do CRD SLOConfig |
-| `SLOConfigStatus` | Status do CRD SLOConfig |
+| `SLOConfigSpec` | Spec do CRD SLOConfig — inclui `auto_detect_framework: bool` (detecta framework via Datadog tag ou annotation K8s) |
+| `SLOConfigStatus` | Status do CRD SLOConfig — inclui `detected_framework: str` (framework detectado automaticamente) |
 
 #### `github_models.py`
 
@@ -370,7 +386,7 @@ jt-operator/
 | `ScorecardService` | Avalia 26+ regras nos workloads, calcula pillar scores |
 | `ScorecardEnricher` | Enriquece scorecard com dados de Backstage e CAST AI |
 | `RemediationService` | Orquestra auto-remediação: Datadog → YAML → GitHub PR → Slack |
-| `SLOService` | Reconcilia SLOConfig CRDs com Datadog (create/update/noop) |
+| `SLOService` | Reconcilia SLOConfig CRDs com Datadog (create/update/noop); auto-detecta framework via annotation K8s → Datadog tag → fallback WSGI; idempotência em 3 caminhos (fast-path por `known_slo_id`, orphan check por tag, fluxo original) |
 | `SLOMetricsService` | Coleta métricas de SLO do Datadog |
 | `SlackService` | Dispara notificações Slack com rate limiting |
 | `NamespaceNotificationBuffer` | Agrega scorecards por namespace e envia digest em lote |
@@ -380,7 +396,7 @@ jt-operator/
 | Controller | Triggers K8s | Responsabilidade |
 |---|---|---|
 | `ScorecardController` | resume/create/update/delete em `apps/v1/deployments` | Avalia scorecard, triggera remediação, escreve CRDs |
-| `SLOController` | create/update/delete em SLOConfig CRD | Sincroniza SLOs com Datadog |
+| `SLOController` | create/update/delete em SLOConfig CRD | Sincroniza SLOs com Datadog; extrai `known_slo_id` de `status.slo_id` e `k8s_annotations` de `metadata.annotations` para passar ao `SLOService`; persiste `detected_framework` no status |
 | `CastaiMonitorController` | Loop periódico | Monitora saúde do agente CAST AI |
 | `BaseController` | — | Helpers: status update, Slack seguro, namespace exclusion |
 
@@ -389,7 +405,7 @@ jt-operator/
 | Port | Métodos principais |
 |---|---|
 | `GitHubPort` | `branch_exists`, `create_branch`, `get_file_content`, `commit_files`, `create_pull_request`, `find_open_remediation_pr` |
-| `DatadogPort` | `get_service_definition`, `get_service_slos`, `create_slo`, `update_slo_apps`, `get_container_metrics` |
+| `DatadogPort` | `get_service_definition`, `get_service_slos`, `create_slo`, `update_slo_apps`, `get_container_metrics`, `find_slo_by_tags` |
 | `SlackPort` | `send_notification`, `test_connection`, `is_enabled` |
 
 ### Infrastructure Adapters (`src/infrastructure/`)
@@ -517,7 +533,33 @@ excluded_namespaces:
 **Solução:** Conferir validação em `slo_controller.py`:
 - `warning` deve ser **menor** que `target` (ex: target=99.9, warning=99.0)
 - Ambos entre 0 e 100
-- Para tipo METRIC: obrigatório `app_framework` OU (`numerator` + `denominator`)
+- Para tipo METRIC: obrigatório `app_framework`, (`numerator` + `denominator`), **ou** `auto_detect_framework: true`
+
+---
+
+### H-13: Framework detectado incorretamente (fallback WSGI inesperado)
+
+**Sintoma:** SLO criado com queries WSGI, mas o serviço usa FastAPI/aiohttp. `status.detected_framework` mostra `"wsgi"` com `detection_source: fallback`.
+
+**Causa:** Nenhuma das fontes de detecção encontrou o framework: (1) sem annotation `titlis.io/app-framework` no recurso SLOConfig, e (2) a Datadog Service Definition do serviço não tem tag `framework:<value>`.
+
+**Solução:** Escolha uma das três abordagens:
+```yaml
+# Opção 1 — annotation no SLOConfig (maior precedência)
+metadata:
+  annotations:
+    titlis.io/app-framework: fastapi
+
+# Opção 2 — tag na Datadog Service Definition do serviço
+tags:
+  - framework:fastapi
+
+# Opção 3 — campo explícito no spec (ignora auto-detecção)
+spec:
+  app_framework: fastapi
+  auto_detect_framework: false
+```
+Verificar no log: campo `detection_source` indica `"annotation"`, `"datadog_tag"` ou `"fallback"`.
 
 ---
 
@@ -587,7 +629,7 @@ excluded_namespaces:
 
 ---
 
-## 7. Quatorze Design Patterns do Projeto
+## 7. Quinze Design Patterns do Projeto
 
 ### P-01: Hexagonal Architecture (Ports & Adapters)
 Domínio isolado de infraestrutura via interfaces abstratas em `src/application/ports/`. Serviços dependem de ports, nunca de adapters diretamente. Facilita testes (mock ports) e troca de providers.
@@ -631,6 +673,12 @@ Usa `ruamel.yaml` (não PyYAML) para ler, modificar e reescrever `deploy.yaml` s
 ### P-14: CRD as State Store
 `AppScorecard` e `AppRemediation` CRDs servem como estado persistente do operador. Permitem que outros sistemas consultem o estado atual sem acesso interno ao operador. Status subresource atualizado após cada evento.
 
+### P-15: Three-Path SLO Idempotency
+`SLOService.reconcile_slo` usa três caminhos de execução para garantir idempotência completa:
+- **Path A** (`known_slo_id` presente) — fast path no restart: usa `status.slo_id` diretamente, salta toda busca, chama `update_slo_apps` direto.
+- **Path B** (`known_slo_id` ausente, `resource_uid` presente) — orphan safety check: busca via `find_slo_by_tags(["titlis_resource_uid:<uid>"])` antes de criar, evita SLOs duplicados após crash/restore.
+- **Path C** — fluxo original: `get_service_slos` → `check_and_update_existing_slo` → create. Todo SLO criado recebe tag `titlis_resource_uid:<k8s-uid>` para permitir Path B em reconciliações futuras.
+
 ---
 
 ## 8. Pipeline Semanal Completo
@@ -649,6 +697,7 @@ Usa `ruamel.yaml` (não PyYAML) para ler, modificar e reescrever `deploy.yaml` s
 
 ```
 10:00 - Verificar SLOConfigs com state=error no status
+10:15 - Checar SLOConfigs com detected_framework=wsgi e detection_source=fallback (possível framework errado)
 10:30 - Checar compliance dos SLOs no Datadog (target vs actual)
 11:00 - Atualizar thresholds se necessário
 ```
@@ -807,4 +856,71 @@ make dev               # clean + dev-install + test + lint
 | [docs/evolution-checklist.md](docs/evolution-checklist.md) | Checklist de progresso do roadmap |
 | [docs/guia-extensao-scorecard.md](docs/guia-extensao-scorecard.md) | Guia para adicionar novas regras de validação |
 | [docs/scorecard-rules.md](docs/scorecard-rules.md) | Todas as 23 regras de validação com detalhamento completo |
+| [docs/guia-titlis-api-kotlin.md](docs/guia-titlis-api-kotlin.md) | Passo a passo para criar a Titlis API (Kotlin/Ktor) e integrar ao operador |
+
+---
+
+## 13. Banco de Dados Relacional
+
+### Status atual
+
+> **Schema criado, não integrado.** O operador persiste estado exclusivamente via CRDs Kubernetes.
+> O banco de dados é uma camada de observabilidade futura — não é pré-requisito para operação.
+
+### Script de criação
+
+```bash
+# Criar o banco (uma única vez em cada ambiente):
+psql -U postgres -c "CREATE DATABASE titlis;"
+psql -U postgres -d titlis -f db/schema.sql
+```
+
+### Estrutura de schemas
+
+| Schema | SLA | Propósito |
+|--------|-----|-----------|
+| `titlis_oltp` | < 5ms | Estado atual de workloads, scorecards, remediações e SLOs |
+| `titlis_audit` | 100% completude | Histórico SCD Type 4 + audit trail de notificações |
+| `titlis_ts` | volume | Métricas CPU/mem e scores time-series (candidato a TimescaleDB) |
+
+### Tabelas principais
+
+| Tabela | Schema | Descrição |
+|--------|--------|-----------|
+| `clusters` | `titlis_oltp` | Clusters Kubernetes registrados |
+| `namespaces` | `titlis_oltp` | Namespaces por cluster |
+| `workloads` | `titlis_oltp` | Deployments rastreados (soft-delete) |
+| `validation_rules` | `titlis_oltp` | Catálogo imutável das 26+ regras |
+| `app_scorecards` | `titlis_oltp` | Estado atual do scorecard (1 por workload — SCD Type 4) |
+| `pillar_scores` | `titlis_oltp` | Score por pilar do scorecard atual |
+| `validation_results` | `titlis_oltp` | Resultado por regra do scorecard atual |
+| `app_remediations` | `titlis_oltp` | Estado atual da remediação (1 por workload — SCD Type 4) |
+| `remediation_issues` | `titlis_oltp` | Issues individuais vinculadas à remediação |
+| `slo_configs` | `titlis_oltp` | Estado atual dos SLOConfig CRDs |
+| `app_scorecard_history` | `titlis_audit` | Histórico de scorecards com snapshot JSONB |
+| `pillar_score_history` | `titlis_audit` | Histórico granular por pilar |
+| `remediation_history` | `titlis_audit` | Log de todas as transições de estado de remediação |
+| `slo_compliance_history` | `titlis_audit` | Histórico de sincronizações com o Datadog |
+| `notification_log` | `titlis_audit` | Auditoria de notificações Slack |
+| `resource_metrics` | `titlis_ts` | CPU/memória coletados do Datadog |
+| `scorecard_scores` | `titlis_ts` | Série temporal plana para Grafana/Metabase |
+
+### Padrões de design do banco
+
+- **PKs como BIGINT IDENTITY**: PKs no formato `<nome_da_tabela>_id BIGINT GENERATED ALWAYS AS IDENTITY` — evita fragmentação de UUID randômico e mantém ordem de inserção.
+- **Nomes compostos**: colunas `name`, `type`, `status` standalone são proibidas; usar sempre prefixo composto (`cluster_name`, `app_remediation_status`, etc.).
+- **VARCHAR sobre TEXT**: preferir `VARCHAR(n)` quando o tamanho máximo é conhecido; `TEXT` apenas quando indefinido (ex: mensagens de erro).
+- **SCD Type 4**: tabela corrente (`app_scorecards`) + tabela histórica separada (`app_scorecard_history`). A **aplicação** arquiva o estado anterior quando `version` muda (sem triggers DML).
+- **Never-FK em audit**: tabelas `titlis_audit.*` usam referências lógicas (sem FK constraint) — histórico sobrevive à deleção de workloads.
+- **Snapshot JSONB**: `pillar_scores` e `validation_results` desnormalizados como JSONB no histórico eliminam joins analíticos.
+- **Sem triggers DML**: `updated_at` e audit trail gerenciados pela aplicação — sem functions/triggers que modifiquem dados no banco.
+- **Particionamento futuro**: `titlis_audit.*` e `titlis_ts.*` projetados para `PARTITION BY RANGE` trimestral via `pg_partman`.
+
+### Quando integrar
+
+A integração com o banco deve ocorrer quando houver necessidade de:
+- Dashboard/frontend com histórico de scores
+- Queries analíticas (top regras que mais falham, taxa de sucesso de remediações)
+- Auditoria de notificações Slack com retenção longa
+- Métricas time-series independentes do Datadog
 

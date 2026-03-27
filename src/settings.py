@@ -4,6 +4,19 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class TitlisApiSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="TITLIS_API_")
+
+    enabled: bool = Field(default=False)
+    host: str = Field(default="titlis-api.titlis-system.svc.cluster.local")
+    udp_port: int = Field(default=8125)
+    http_port: int = Field(default=8080)
+
+    @property
+    def http_base_url(self) -> str:
+        return f"http://{self.host}:{self.http_port}"
+
+
 class SlackSettings(BaseSettings):
     enabled: bool = Field(default=True, validation_alias="SLACK_ENABLED")
     webhook_url: Optional[SecretStr] = Field(
@@ -167,12 +180,16 @@ class RemediationSettings(BaseSettings):
 
 
 class Settings(BaseSettings):
+    titlis_api: TitlisApiSettings = Field(default_factory=TitlisApiSettings)
     slack: SlackSettings = Field(default_factory=SlackSettings)
     github: GitHubSettings = Field(default_factory=GitHubSettings)
     remediation: RemediationSettings = Field(default_factory=RemediationSettings)
 
     kubernetes_namespace: str = Field(
         default="titlis-system", validation_alias="KUBERNETES_NAMESPACE"
+    )
+    kubernetes_cluster_name: str = Field(
+        default="unknown", validation_alias="KUBERNETES_CLUSTER_NAME"
     )
     service_account_name: str = Field(
         default="titlis-operator", validation_alias="SERVICE_ACCOUNT_NAME"
@@ -220,6 +237,22 @@ class Settings(BaseSettings):
     )
     castai_cluster_name: str = Field(
         default="develop", validation_alias="CASTAI_CLUSTER_NAME"
+    )
+
+    enable_synthetic_monitor: bool = Field(
+        default=False, validation_alias="ENABLE_SYNTHETIC_MONITOR"
+    )
+    synthetic_monitor_name: str = Field(
+        default="jeitto-homepage", validation_alias="SYNTHETIC_MONITOR_NAME"
+    )
+    synthetic_monitor_url: str = Field(
+        default="https://jeitto.com.br", validation_alias="SYNTHETIC_MONITOR_URL"
+    )
+    synthetic_monitor_interval_seconds: int = Field(
+        default=60, validation_alias="SYNTHETIC_MONITOR_INTERVAL_SECONDS"
+    )
+    synthetic_monitor_timeout_seconds: float = Field(
+        default=10.0, validation_alias="SYNTHETIC_MONITOR_TIMEOUT_SECONDS"
     )
 
     backstage_url: Optional[str] = Field(default=None, validation_alias="BACKSTAGE_URL")

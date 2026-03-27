@@ -28,6 +28,19 @@ def init_logging() -> None:
 
 
 @lru_cache()
+def get_titlis_api_client() -> Any:
+    if not settings.titlis_api.enabled:
+        return None
+    from src.infrastructure.titlis_api.udp_client import TitlisApiUdpClient
+
+    return TitlisApiUdpClient(
+        host=settings.titlis_api.host,
+        udp_port=settings.titlis_api.udp_port,
+        http_base_url=settings.titlis_api.http_base_url,
+    )
+
+
+@lru_cache()
 def get_backstage_enricher() -> Any:
     from src.infrastructure.backstage.enricher import BackstageEnricher
 
@@ -105,9 +118,7 @@ def get_scorecard_enricher() -> ScorecardEnricher:
     )
 
 
-lru_cache()
-
-
+@lru_cache()
 def get_slo_metrics_service() -> Optional[SLOMetricsService]:
     if not settings.enable_slo_controller:
         logger.info(
@@ -428,6 +439,7 @@ def get_remediation_service() -> Any:
         slack_service=slack_service,
         datadog_repository=datadog_repo,
         remediation_settings=settings.remediation,
+        titlis_api_client=get_titlis_api_client(),
     )
 
     logger.info("RemediationService inicializado")

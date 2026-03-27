@@ -370,21 +370,23 @@ PM_REQUIRE_HUMAN_APPROVAL=true
 
 ## Parte III — Design Patterns Planejados (Futuros)
 
-Complementam os 14 patterns atuais documentados no CLAUDE.md.
+Complementam os 15 patterns atuais documentados no CLAUDE.md.
 
-### P-15: VCS Abstraction Factory (Fase 2)
+> **P-15 já implementado** — ver CLAUDE.md §7 (Three-Path SLO Idempotency).
+
+### P-16: VCS Abstraction Factory (Fase 2)
 `dependencies.py` usa `VCS_DEFAULT_PROVIDER` para selecionar qual adapter retornar via factory. Permite troca de provider sem alterar lógica de remediação.
 
-### P-16: Observability Query Translation (Fase 3)
+### P-17: Observability Query Translation (Fase 3)
 Queries de domínio (ex: `get_cpu_avg_last_24h(service, namespace)`) são traduzidas para DSL específico de cada provedor por um `QueryTranslator`. Resultado normalizado antes de retornar ao domínio.
 
-### P-17: Product Discovery Strategy Chain (Fase 5)
+### P-18: Product Discovery Strategy Chain (Fase 5)
 `ProductDiscoveryService` implementa Chain of Responsibility: cada estratégia tenta descobrir o produto e passa para a próxima se falhar. Estratégia `cascade` executa todas em ordem configurável.
 
-### P-18: AI Safety Gate (Fase 6)
+### P-19: AI Safety Gate (Fase 6)
 Toda sugestão de agente AI passa por `AISafetyChecker` antes de ser aplicada. Gate verifica: arquivo permitido, tamanho do diff, ausência de credenciais, e opcionalmente exige aprovação humana.
 
-### P-19: PM Ticket Deduplication (Fase 7)
+### P-20: PM Ticket Deduplication (Fase 7)
 Antes de criar ticket, `ProjectManagementService` busca tickets abertos com mesmo `rule_id + namespace + resource`. Mesmo padrão do `find_open_remediation_pr` já implementado.
 
 ---

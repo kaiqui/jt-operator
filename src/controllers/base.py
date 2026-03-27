@@ -3,7 +3,11 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 from src.utils.json_logger import get_logger
-from src.bootstrap.dependencies import get_status_writer, get_slack_service
+from src.bootstrap.dependencies import (
+    get_slack_service,
+    get_status_writer,
+    get_titlis_api_client,
+)
 from src.domain.slack_models import NotificationSeverity, NotificationChannel
 from src.domain.models import ComplianceReport
 
@@ -14,6 +18,7 @@ class BaseController:
         self.logger = get_logger(f"controller.{name}")
         self.status_writer = get_status_writer()
         self.slack_service = get_slack_service()
+        self.titlis_api_client = get_titlis_api_client()
         self._check_enabled()
         self.logger.debug(
             f"Controller {name} inicializado",
@@ -109,6 +114,30 @@ class BaseController:
                     f"Falha ao enviar notificação Slack: {title[:50]}",
                     extra={"severity": severity.value, "channel": channel.value},
                 )
+
+            if self.titlis_api_client:
+                try:
+                    await self.titlis_api_client.send_notification_log(
+                        {
+                            "workload_id": kwargs.get("workload_id"),
+                            "namespace": namespace or "default",
+                            "notification_type": kwargs.get(
+                                "notification_type", self.name
+                            ),
+                            "severity": severity.value.upper(),
+                            "channel": channel.value,
+                            "title": title,
+                            "message_preview": message[:500],
+                            "success": success,
+                            "error_message": None
+                            if success
+                            else "Falha ao enviar notificação Slack",
+                        }
+                    )
+                except Exception:
+                    self.logger.exception(
+                        "Falha ao registrar notificação na Titlis API"
+                    )
 
             return success
 

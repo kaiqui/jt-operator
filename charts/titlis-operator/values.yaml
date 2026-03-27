@@ -22,6 +22,7 @@ operator:
 
 # Kubernetes
 kubernetes:
+  clusterName: "unknown"
   namespace: "titlis-system"
   serviceAccountName: "titlis-operator"
 
@@ -79,6 +80,13 @@ castai:
   # Secrets: CASTAI_API_KEY and CASTAI_CLUSTER_ID must be in titlis-castai-keys secret
   costCacheTtlSeconds: 300
   costEnrichmentEnabled: false
+
+synthetic:
+  monitorEnabled: false
+  monitorName: "jeitto-homepage"
+  monitorUrl: "https://jeitto.com.br"
+  monitorIntervalSeconds: 60
+  monitorTimeoutSeconds: 10.0
 
 # Backstage
 backstage:

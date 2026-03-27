@@ -23,6 +23,12 @@ class TestSLOService:
         # Mock update_slo_apps
         mock.update_slo_apps.return_value = True
 
+        # Mock find_slo_by_tags
+        mock.find_slo_by_tags.return_value = None
+
+        # Mock get_service_definition
+        mock.get_service_definition.return_value = None
+
         return mock
 
     @pytest.fixture
@@ -151,6 +157,165 @@ class TestSLOService:
         assert "description" in changes
         assert changes["target_threshold"]["old"] == 99.0
         assert changes["target_threshold"]["new"] == 99.9
+
+    def test_reconcile_slo_with_known_slo_id_skips_search(
+        self, slo_service, sample_slo_spec, mock_datadog_port
+    ):
+        mock_datadog_port.update_slo_apps.return_value = True
+
+        result = slo_service.reconcile_slo(
+            namespace="default",
+            service="test-service",
+            spec=sample_slo_spec,
+            known_slo_id="existing-slo-abc",
+            resource_uid="uid-123",
+        )
+
+        mock_datadog_port.get_service_slos.assert_not_called()
+        mock_datadog_port.update_slo_apps.assert_called_once()
+        assert result["success"] is True
+        assert result["action"] == "updated"
+        assert result["slo_id"] == "existing-slo-abc"
+
+    def test_reconcile_slo_finds_orphan_by_uid_tag(
+        self, slo_service, sample_slo_spec, mock_datadog_port
+    ):
+        from src.domain.models import SLO as SLOModel
+
+        orphan = Mock(spec=SLOModel)
+        orphan.slo_id = "orphan-slo-id"
+        orphan.tags = ["titlis_resource_uid:uid-xyz"]
+        orphan.target_threshold = 99.9
+        orphan.warning_threshold = 99.0
+        orphan.timeframe = SLOTimeframe.THIRTY_DAYS
+        orphan.description = "orphan"
+
+        mock_datadog_port.find_slo_by_tags.return_value = orphan
+        mock_datadog_port.update_slo_apps.return_value = True
+
+        result = slo_service.reconcile_slo(
+            namespace="default",
+            service="test-service",
+            spec=sample_slo_spec,
+            known_slo_id=None,
+            resource_uid="uid-xyz",
+        )
+
+        mock_datadog_port.find_slo_by_tags.assert_called_once_with(
+            ["titlis_resource_uid:uid-xyz"]
+        )
+        mock_datadog_port.create_slo.assert_not_called()
+        assert result["success"] is True
+        assert result["action"] == "updated"
+        assert result["slo_id"] == "orphan-slo-id"
+
+    def test_reconcile_slo_no_orphan_falls_through_to_create(
+        self, slo_service, sample_slo_spec, mock_datadog_port
+    ):
+        mock_datadog_port.find_slo_by_tags.return_value = None
+        mock_datadog_port.get_service_slos.return_value = []
+        mock_datadog_port.create_slo.return_value = "new-slo-id"
+
+        result = slo_service.reconcile_slo(
+            namespace="default",
+            service="test-service",
+            spec=sample_slo_spec,
+            known_slo_id=None,
+            resource_uid="uid-new",
+        )
+
+        mock_datadog_port.create_slo.assert_called_once()
+        assert result["action"] == "created"
+        assert result["slo_id"] == "new-slo-id"
+
+    def test_build_slo_from_spec_includes_resource_uid_tag(
+        self, slo_service, sample_slo_spec
+    ):
+        slo = slo_service._build_slo_from_spec(
+            namespace="default",
+            service="test-service",
+            spec=sample_slo_spec,
+            resource_uid="my-k8s-uid",
+        )
+
+        assert "titlis_resource_uid:my-k8s-uid" in slo.tags
+
+    def test_detect_framework_priority1_annotation(self, slo_service):
+        spec = SLOConfigSpec(
+            service="test-service",
+            type=SLOType.METRIC,
+            target=99.9,
+            auto_detect_framework=True,
+        )
+        annotations = {"titlis.io/app-framework": "fastapi"}
+
+        fw, source = slo_service._detect_framework(spec, annotations)
+
+        assert fw == SLOAppFramework.FASTAPI
+        assert source == "annotation"
+
+    def test_detect_framework_priority2_datadog_tag(
+        self, slo_service, mock_datadog_port
+    ):
+        from src.domain.models import ServiceDefinition
+
+        mock_service_def = Mock(spec=ServiceDefinition)
+        mock_service_def.tags = ["framework:aiohttp", "env:prod"]
+        mock_datadog_port.get_service_definition.return_value = mock_service_def
+
+        spec = SLOConfigSpec(
+            service="test-service",
+            type=SLOType.METRIC,
+            target=99.9,
+            auto_detect_framework=True,
+        )
+
+        fw, source = slo_service._detect_framework(spec, k8s_annotations={})
+
+        mock_datadog_port.get_service_definition.assert_called_once_with("test-service")
+        assert fw == SLOAppFramework.AIOHTTP
+        assert source == "datadog_tag"
+
+    def test_detect_framework_priority3_fallback(self, slo_service, mock_datadog_port):
+        mock_datadog_port.get_service_definition.return_value = None
+
+        spec = SLOConfigSpec(
+            service="test-service",
+            type=SLOType.METRIC,
+            target=99.9,
+            auto_detect_framework=True,
+        )
+
+        fw, source = slo_service._detect_framework(spec, k8s_annotations=None)
+
+        assert fw == SLOAppFramework.WSGI
+        assert source == "fallback"
+
+    def test_auto_detect_framework_writes_detected_framework_in_result(
+        self, slo_service, mock_datadog_port
+    ):
+        mock_datadog_port.find_slo_by_tags.return_value = None
+        mock_datadog_port.get_service_slos.return_value = []
+        mock_datadog_port.create_slo.return_value = "slo-fw-test"
+        mock_datadog_port.get_service_definition.return_value = None
+
+        spec = SLOConfigSpec(
+            service="fw-service",
+            type=SLOType.METRIC,
+            target=99.9,
+            auto_detect_framework=True,
+        )
+
+        result = slo_service.reconcile_slo(
+            namespace="default",
+            service="fw-service",
+            spec=spec,
+            resource_uid="uid-fw",
+        )
+
+        assert "detected_framework" in result
+        assert result["detected_framework"] == "wsgi"
+        assert result["detection_source"] == "fallback"
 
 
 class TestScorecardService:

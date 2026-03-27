@@ -27,3 +27,7 @@ class DatadogPort(ABC):
     @abstractmethod
     def get_request_count(self, service_name: str, days: int = 30) -> Optional[int]:
         pass
+
+    @abstractmethod
+    def find_slo_by_tags(self, tags: List[str]) -> Optional[SLO]:
+        pass

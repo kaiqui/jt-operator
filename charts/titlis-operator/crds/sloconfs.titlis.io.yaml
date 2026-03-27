@@ -43,6 +43,9 @@ spec:
                 app_framework:
                   type: string
                   enum: ["wsgi", "fastapi", "aiohttp"]
+                auto_detect_framework:
+                  type: boolean
+                  default: false
             status:
               type: object
               properties:
@@ -53,6 +56,10 @@ spec:
                 last_sync:
                   type: string
                   format: date-time
+                error:
+                  type: string
+                detected_framework:
+                  type: string
                 conditions:
                   type: array
                   items:

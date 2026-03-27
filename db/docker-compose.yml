@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: titlis-db
+    environment:
+      POSTGRES_USER: titlis
+      POSTGRES_PASSWORD: titlis
+      POSTGRES_DB: titlis
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+      - titlis-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U titlis -d titlis"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  titlis-pgdata:

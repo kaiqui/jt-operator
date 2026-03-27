@@ -99,6 +99,11 @@ spec:
                   key: LEADER_ELECTION_NAMESPACE
 
             # ── Kubernetes ──────────────────────────────────────────────────
+            - name: KUBERNETES_CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: KUBERNETES_CLUSTER_NAME
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 configMapKeyRef:
@@ -182,6 +187,33 @@ spec:
                 configMapKeyRef:
                   name: {{ include "titlis.fullname" . }}-config
                   key: ENABLE_CASTAI_COST_ENRICHMENT
+
+            # ── Synthetic Monitor ──────────────────────────────────────────
+            - name: ENABLE_SYNTHETIC_MONITOR
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: ENABLE_SYNTHETIC_MONITOR
+            - name: SYNTHETIC_MONITOR_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: SYNTHETIC_MONITOR_NAME
+            - name: SYNTHETIC_MONITOR_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: SYNTHETIC_MONITOR_URL
+            - name: SYNTHETIC_MONITOR_INTERVAL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: SYNTHETIC_MONITOR_INTERVAL_SECONDS
+            - name: SYNTHETIC_MONITOR_TIMEOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "titlis.fullname" . }}-config
+                  key: SYNTHETIC_MONITOR_TIMEOUT_SECONDS
 
             # ── Backstage ───────────────────────────────────────────────────
             - name: BACKSTAGE_URL

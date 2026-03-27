@@ -122,6 +122,10 @@ class SLOConfigSpec(BaseModel):
     )
     tags: List[str] = Field(default_factory=list, description="Tags adicionais")
     description: Optional[str] = Field(None, description="Descrição do SLO")
+    auto_detect_framework: bool = Field(
+        default=False,
+        description="Auto-detectar framework via Datadog Service Definition",
+    )
 
 
 class SLOConfigStatus(BaseModel):
@@ -131,6 +135,9 @@ class SLOConfigStatus(BaseModel):
     error: Optional[str] = Field(None, description="Erro se houver")
     conditions: List[Dict[str, Any]] = Field(
         default_factory=list, description="Condições do recurso"
+    )
+    detected_framework: Optional[str] = Field(
+        None, description="Framework detectado automaticamente"
     )
 
 
