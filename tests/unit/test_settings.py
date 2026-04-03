@@ -24,6 +24,7 @@ class TestSettings:
             "SLACK_ENABLED": "false",
             "SLACK_DEFAULT_CHANNEL": "#test",
             "DD_API_KEY": "test-key",
+            "DEFAULT_TENANT_ID": "42",
         },
     )
     def test_settings_from_env(self):
@@ -31,6 +32,7 @@ class TestSettings:
         assert settings.slack.enabled is False
         assert settings.slack.default_channel == "#test"
         assert settings.datadog_api_key == "test-key"
+        assert settings.titlis_api.default_tenant_id == 42
 
     def test_settings_singleton(self):
         from src.settings import settings as singleton1

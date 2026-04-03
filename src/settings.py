@@ -11,6 +11,9 @@ class TitlisApiSettings(BaseSettings):
     host: str = Field(default="titlis-api.titlis-system.svc.cluster.local")
     udp_port: int = Field(default=8125)
     http_port: int = Field(default=8080)
+    default_tenant_id: Optional[int] = Field(
+        default=None, validation_alias="DEFAULT_TENANT_ID"
+    )
 
     @property
     def http_base_url(self) -> str:

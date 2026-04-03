@@ -37,6 +37,7 @@ def get_titlis_api_client() -> Any:
         host=settings.titlis_api.host,
         udp_port=settings.titlis_api.udp_port,
         http_base_url=settings.titlis_api.http_base_url,
+        default_tenant_id=settings.titlis_api.default_tenant_id,
     )
 
 
